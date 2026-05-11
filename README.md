@@ -406,7 +406,7 @@ def fused_mla_normal_rotary_emb(
 - optimize mcoplib project build 
 - support mxbench for auto test op kernel `s perfromance
 - support profiler tools check op kernel `s perfromance
-- support for vllm 0.19.0  op kernels
+- support for vllm 0.20.0  op kernels
 - support Project-customized op kernels
 - support k-transformer op kernels
 - support verl op kernels

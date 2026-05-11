@@ -336,6 +336,8 @@ def sgl_fused_moe_kernel(
     c_sorted: tl.constexpr,
     filter_expert: tl.constexpr,
     swap_ab: tl.constexpr,
+    FUSE_SUM_ALL_REDUCE: tl.constexpr,
+    ROUTER_TOPK: tl.constexpr,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -560,14 +562,26 @@ def sgl_fused_moe_kernel(
     # -----------------------------------------------------------
     # Write back the block of the output
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    if c_sorted:
+    if FUSE_SUM_ALL_REDUCE:
+        offs_token_out = offs_token // ROUTER_TOPK
         c_ptrs = (
-            c_ptr + stride_cm * offs_token_id[:, None] + stride_cn * offs_cn[None, :]
+            c_ptr + stride_cm * offs_token_out[:, None] + stride_cn * offs_cn[None, :]
         )
+        c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+        tl.atomic_add(c_ptrs, accumulator, mask=c_mask)
     else:
-        c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
-    c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, accumulator, mask=c_mask)
+        if c_sorted:
+            c_ptrs = (
+                c_ptr
+                + stride_cm * offs_token_id[:, None]
+                + stride_cn * offs_cn[None, :]
+            )
+        else:
+            c_ptrs = (
+                c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
+            )
+        c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+        tl.store(c_ptrs, accumulator, mask=c_mask)
 
 @triton.jit
 def fused_moe_kernel_gptq_awq(
@@ -1394,12 +1408,17 @@ def sgl_invoke_fused_moe_kernel(
     b_use_tma: bool = False,
     c_sorted: bool = False,
     filter_expert: bool = True,
+    fuse_sum_all_reduce: bool = False,
+    router_topk: int = 1,
 ) -> None:
 
     if use_fp8_w8a8:
         swap_ab = should_enable_swap_ab(config["BLOCK_SIZE_M"], config["BLOCK_SIZE_N"])
     else:
         swap_ab = False
+    
+    if fuse_sum_all_reduce:
+        assert not c_sorted, "fuse_sum_all_reduce only supports c_sorted=False"
     #assert topk_weights.stride(1) == 1
     #assert sorted_token_ids.stride(0) == 1
     assert topk_weights is not None or not mul_routed_weight
@@ -1447,6 +1466,9 @@ def sgl_invoke_fused_moe_kernel(
     elif use_int8_w8a16 or use_int4_w4a16:
         assert B_scale is not None
         assert block_shape is None or block_shape[0] == 0
+        assert (
+            not fuse_sum_all_reduce
+        ), "fuse_sum_all_reduce is not supported for GPTQ/AWQ kernels"
     else:
         assert A_scale is None
         assert B_scale is None
@@ -1575,6 +1597,8 @@ def sgl_invoke_fused_moe_kernel(
             c_sorted=c_sorted,
             filter_expert=filter_expert,
             swap_ab=swap_ab,
+            FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
+            ROUTER_TOPK=router_topk,
             **config,
         )
 

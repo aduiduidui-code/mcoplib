@@ -191,14 +191,15 @@ __global__ void add_rms_norm_quant_padding_output_opt_kernel(
     float const min_scaling_factor,
     int32_t const hidden_size,
     int32_t const pad_size,
-    int32_t const num_tokens){
+    int32_t const num_tokens,
+    bool const has_residual){
 
     float ss = 0.0f;
     float block_absmax_val_maybe = 0.0f;
 
     vec4_t<scalar_t> const* vec_weight = reinterpret_cast<vec4_t<scalar_t> const*>(weight);
     vec4_t<scalar_t> const* vec_input = reinterpret_cast<vec4_t<scalar_t> const*>(&input[blockIdx.x * hidden_size]);
-    vec4_t<scalar_t>* vec_residual = reinterpret_cast<vec4_t<scalar_t>*>(&residual[blockIdx.x * hidden_size]);
+    vec4_t<scalar_t>* vec_residual = has_residual ? reinterpret_cast<vec4_t<scalar_t>*>(&residual[blockIdx.x * hidden_size]) : nullptr;
     constexpr scalar_out_t qmax{std::numeric_limits<scalar_out_t>::max()};
 
     float red_reg[16];
@@ -206,24 +207,34 @@ __global__ void add_rms_norm_quant_padding_output_opt_kernel(
 
     for(int32_t i = threadIdx.x; i < num_vec_elems; i += block_dim) {
         vec4_t<scalar_t> x1 = vec_input[i];
-        vec4_t<scalar_t> x2 = vec_residual[i];
+        //vec4_t<scalar_t> x2 = vec_residual[i];
         vec4_t<scalar_t> const w = vec_weight[i];
 
-        red_reg[idx + 0] = static_cast<float>(x2.x) + static_cast<float>(x1.x);
-        red_reg[idx + 1] = static_cast<float>(x2.y) + static_cast<float>(x1.y);
-        red_reg[idx + 2] = static_cast<float>(x2.z) + static_cast<float>(x1.z);
-        red_reg[idx + 3] = static_cast<float>(x2.w) + static_cast<float>(x1.w);
+        if (has_residual) {
+            vec4_t<scalar_t> x2 = vec_residual[i];
+            red_reg[idx + 0] = static_cast<float>(x2.x) + static_cast<float>(x1.x);
+            red_reg[idx + 1] = static_cast<float>(x2.y) + static_cast<float>(x1.y);
+            red_reg[idx + 2] = static_cast<float>(x2.z) + static_cast<float>(x1.z);
+            red_reg[idx + 3] = static_cast<float>(x2.w) + static_cast<float>(x1.w);
+
+            x2.x = static_cast<scalar_t>(red_reg[idx + 0]);
+            x2.y = static_cast<scalar_t>(red_reg[idx + 1]);
+            x2.z = static_cast<scalar_t>(red_reg[idx + 2]);
+            x2.w = static_cast<scalar_t>(red_reg[idx + 3]);
+            vec_residual[i] = x2;
+        } else {
+            // No residual: use input directly
+            red_reg[idx + 0] = static_cast<float>(x1.x);
+            red_reg[idx + 1] = static_cast<float>(x1.y);
+            red_reg[idx + 2] = static_cast<float>(x1.z);
+            red_reg[idx + 3] = static_cast<float>(x1.w);
+        }
+
 
         ss += square(red_reg[idx + 0]);
         ss += square(red_reg[idx + 1]);
         ss += square(red_reg[idx + 2]);
         ss += square(red_reg[idx + 3]);
-
-        x2.x = static_cast<scalar_t>(red_reg[idx + 0]);
-        x2.y = static_cast<scalar_t>(red_reg[idx + 1]);
-        x2.z = static_cast<scalar_t>(red_reg[idx + 2]);
-        x2.w = static_cast<scalar_t>(red_reg[idx + 3]);
-        vec_residual[i] = x2;
 
         red_reg[idx + 0] *= static_cast<float>(w.x);
         red_reg[idx + 1] *= static_cast<float>(w.y);
@@ -297,7 +308,8 @@ __global__ void add_rms_norm_dynamic_per_token_quant_padding_output_kernel(
     float const min_scaling_factor,
     int32_t const hidden_size,
     int32_t const pad_size,
-    int32_t const num_tokens){
+    int32_t const num_tokens,
+    bool const has_residual){
     for (int32_t block_idx = blockIdx.x; block_idx < num_tokens; block_idx += gridDim.x) {
         int64_t token_offset = block_idx * static_cast<int64_t>(hidden_size);
         float ss = 0.0f;
@@ -306,11 +318,16 @@ __global__ void add_rms_norm_dynamic_per_token_quant_padding_output_kernel(
         float* out_scale_ptr = reinterpret_cast<float*>(&out[hidden_size + block_idx * pad_size * 2]);
 
         for(int32_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
-            float x = static_cast<float>(input[token_offset + i]) + static_cast<float>(residual[token_offset + i]);
+            float x;
+            if (has_residual) {
+                x = static_cast<float>(input[token_offset + i]) + static_cast<float>(residual[token_offset + i]);
+                residual[token_offset + i] = static_cast<scalar_t>(x);
+            } else {
+                x = static_cast<float>(input[token_offset + i]);
+            }
             scalar_t const w = weight[i];
             block_absmax_val_maybe = fmaxf(block_absmax_val_maybe, fabs(static_cast<scalar_t>(x) * w));
             ss += x * x;
-            residual[token_offset + i] = static_cast<scalar_t>(x);
         }
 
         using BlockReduce = cub::BlockReduce<float, 512>;
@@ -335,7 +352,12 @@ __global__ void add_rms_norm_dynamic_per_token_quant_padding_output_kernel(
         __syncthreads();
 
         for(int32_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
-            float x = static_cast<float>(residual[token_offset + i]);
+            float x;
+            if (has_residual) {
+                x = static_cast<float>(residual[token_offset + i]);
+            } else {
+                x = static_cast<float>(input[token_offset + i]);
+            }
             scalar_t const w = weight[i];
             float token_scale_ = 1.0f / s_token_scale;
             float tmp = x * s_rms;
@@ -358,7 +380,8 @@ void add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch(torch::Te
                                                                         torch::Tensor& residual,
                                                                         torch::Tensor const& weight, 
                                                                         int64_t const pad_size, 
-                                                                        double const var_epsilon){
+                                                                        double const var_epsilon,
+                                                                        bool const has_residual){
     int32_t hidden_size = input.size(-1);
     int32_t num_tokens = input.numel() / hidden_size;
     int dev = 0;
@@ -378,14 +401,15 @@ void add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch(torch::Te
           ? std::numeric_limits<float>::epsilon()
           : 1.0f / (std::numeric_limits<c10::Float8_e4m3fn>::max() * 448.f);
     
+    scalar_in_t* residual_ptr = has_residual ? residual.data_ptr<scalar_in_t>() : nullptr;
     if (hidden_size == 7168) {
         MOE_DISPATCH_MORE_QUANT_TYPES(output.scalar_type(), "add_rms_norm_quant_padding_output_opt_kernel", [&] {
             vllm::add_rms_norm_quant_padding_output_opt_kernel<scalar_in_t, scalar_t, VPT, 7168 / VPT, block_d>
                 <<<num_tokens, block_d, 0, stream>>>(
                     output.data_ptr<scalar_t>(), out_rms.data_ptr<scalar_in_t>(), output_quant_int8.data_ptr<scalar_t>(), 
                     out_scales.data_ptr<float>(), input.data_ptr<scalar_in_t>(), 
-                    residual.data_ptr<scalar_in_t>(), weight.data_ptr<scalar_in_t>(),
-                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens
+                    residual_ptr, weight.data_ptr<scalar_in_t>(),
+                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens, has_residual
                 );
         });
     }  else if (hidden_size == 5120) {
@@ -394,8 +418,18 @@ void add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch(torch::Te
                 <<<num_tokens, block_d, 0, stream>>>(
                     output.data_ptr<scalar_t>(), out_rms.data_ptr<scalar_in_t>(), output_quant_int8.data_ptr<scalar_t>(), 
                     out_scales.data_ptr<float>(), input.data_ptr<scalar_in_t>(), 
-                    residual.data_ptr<scalar_in_t>(), weight.data_ptr<scalar_in_t>(),
-                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens
+                    residual_ptr, weight.data_ptr<scalar_in_t>(),
+                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens, has_residual
+                );
+        });
+    } else if (hidden_size == 4096) {
+        MOE_DISPATCH_MORE_QUANT_TYPES(output.scalar_type(), "add_rms_norm_quant_padding_output_opt_kernel", [&] {
+            vllm::add_rms_norm_quant_padding_output_opt_kernel<scalar_in_t, scalar_t, VPT, 4096 / VPT, block_d>
+                <<<num_tokens, block_d, 0, stream>>>(
+                    output.data_ptr<scalar_t>(), out_rms.data_ptr<scalar_in_t>(), output_quant_int8.data_ptr<scalar_t>(), 
+                    out_scales.data_ptr<float>(), input.data_ptr<scalar_in_t>(), 
+                    residual_ptr, weight.data_ptr<scalar_in_t>(),
+                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens, has_residual
                 );
         });
     } else if (hidden_size == 6144){
@@ -404,8 +438,8 @@ void add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch(torch::Te
                 <<<num_tokens, block_d, 0, stream>>>(
                     output.data_ptr<scalar_t>(), out_rms.data_ptr<scalar_in_t>(), output_quant_int8.data_ptr<scalar_t>(), 
                     out_scales.data_ptr<float>(), input.data_ptr<scalar_in_t>(), 
-                    residual.data_ptr<scalar_in_t>(), weight.data_ptr<scalar_in_t>(),
-                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens
+                    residual_ptr, weight.data_ptr<scalar_in_t>(),
+                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens, has_residual
                 );
         });
     } else if(hidden_size == 3072) {
@@ -414,8 +448,8 @@ void add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch(torch::Te
                 <<<num_tokens, block_d, 0, stream>>>(
                     output.data_ptr<scalar_t>(), out_rms.data_ptr<scalar_in_t>(), output_quant_int8.data_ptr<scalar_t>(), 
                     out_scales.data_ptr<float>(), input.data_ptr<scalar_in_t>(), 
-                    residual.data_ptr<scalar_in_t>(), weight.data_ptr<scalar_in_t>(),
-                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens
+                    residual_ptr, weight.data_ptr<scalar_in_t>(),
+                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens, has_residual
                 );
         });
     } else {
@@ -424,8 +458,8 @@ void add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch(torch::Te
                 <<<grid, block, 0, stream>>>(
                     output.data_ptr<scalar_t>(), out_rms.data_ptr<scalar_in_t>(), output_quant_int8.data_ptr<scalar_t>(), 
                     out_scales.data_ptr<float>(), input.data_ptr<scalar_in_t>(), 
-                    residual.data_ptr<scalar_in_t>(), weight.data_ptr<scalar_in_t>(),
-                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens
+                    residual_ptr, weight.data_ptr<scalar_in_t>(),
+                    var_epsilon, min_scaling_factor, hidden_size, pad_size, num_tokens, has_residual
                 );
         });
     }
@@ -437,7 +471,7 @@ void add_rms_norm_dynamic_per_token_quant_padding_output(at::Tensor& output,
                                                          at::Tensor& output_quant_int8,
                                                          at::Tensor& out_scales,
                                                          at::Tensor const& input,
-                                                         at::Tensor& residual,
+                                                         std::optional<at::Tensor>& residual,
                                                          at::Tensor const& weight, 
                                                          const int pad_size, 
                                                          const float epsilon){
@@ -446,9 +480,19 @@ void add_rms_norm_dynamic_per_token_quant_padding_output(at::Tensor& output,
     TORCH_CHECK(output.dtype() == torch::kInt8 || output.dtype() == torch::kFloat8_e4m3fn);
     TORCH_CHECK(input.dtype() == at::ScalarType::BFloat16);
     TORCH_CHECK(output.is_contiguous() && input.is_contiguous());
+
+    bool has_residual = residual.has_value();
+    // Create a placeholder tensor when residual is None (not actually used in kernel)
+    at::Tensor residual_tensor = has_residual ? residual.value() : at::Tensor();
+
+    if (has_residual) {
+        TORCH_CHECK(residual.value().dtype() == at::ScalarType::BFloat16);
+        TORCH_CHECK(residual.value().sizes() == input.sizes());
+        TORCH_CHECK(residual.value().is_contiguous());
+    }
     MOE_DISPATCH_FLOATING_TYPES(
         input.scalar_type(), "add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch", [&] {
-            add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch<scalar_t>(output, output_rms, output_quant_int8, out_scales, input, residual, weight, 
-                                                                            pad_size, epsilon);
+            add_rms_norm_dynamic_per_token_quant_padding_output_with_dispatch<scalar_t>(output, output_rms, output_quant_int8, out_scales, input, residual_tensor, weight, 
+                                                                            pad_size, epsilon, has_residual);
         });
 }

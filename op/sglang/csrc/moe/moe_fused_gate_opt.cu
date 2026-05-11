@@ -79,6 +79,7 @@ int64_t fused_moe_gate_opt(
     LAUNCH_MOE_GATE(0, 320, 1, 1, 8)
     LAUNCH_MOE_GATE(0, 384, 1, 1, 8)
     LAUNCH_MOE_GATE(0, 448, 1, 1, 8)
+    LAUNCH_MOE_GATE(0, 288, 1, 1, 8)
     // TopK=9, 1个共享专家配置 (按专家数排序)
     LAUNCH_MOE_GATE(1, 160, 1, 1, 9)
     LAUNCH_MOE_GATE(1, 256, 1, 1, 9)

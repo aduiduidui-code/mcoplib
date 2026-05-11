@@ -1,8 +1,11 @@
 #include <ATen/ATen.h>
+#include <c10/util/Optional.h>
 void fused_silu_mul_dq_mask_quant_pack(
     at::Tensor& out,          
     at::Tensor const& input, 
-    at::Tensor const &mask);
+    at::Tensor const &mask,
+    c10::optional<float> _swiglu_limit,
+    c10::optional<at::Tensor> weight);
 
 void fused_silu_mul_dq_mask_quant_fp8_pack(
     torch::Tensor& out,          

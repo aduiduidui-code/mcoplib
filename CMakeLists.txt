@@ -223,6 +223,8 @@ if (BUILD_VLLM_SUBMODULE)
     "${VLLM_SRC_DIR}/layernorm_kernels.cu"
     "${VLLM_SRC_DIR}/layernorm_quant_kernels.cu"
     "${VLLM_SRC_DIR}/fused_qknorm_rope_kernel.cu"
+    # "${VLLM_SRC_DIR}/minimax_reduce_rms_kernel.cu"
+    "${VLLM_SRC_DIR}/fused_deepseek_v4_qnorm_rope_kv_insert_kernel.cu"
     "${VLLM_SRC_DIR}/sampler.cu"
     "${VLLM_SRC_DIR}/topk.cu"
     "${VLLM_SRC_DIR}/dsv3_fused_a_gemm.cu"
@@ -231,6 +233,7 @@ if (BUILD_VLLM_SUBMODULE)
     "${VLLM_SRC_DIR}/quantization/compressed_tensors/int8_quant_kernels.cu"
     "${VLLM_SRC_DIR}/quantization/fp8/common.cu"
     "${VLLM_SRC_DIR}/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.cu"
+    "${VLLM_SRC_DIR}/quantization/fused_kernels/fused_silu_mul_block_quant.cu"
     "${VLLM_SRC_DIR}/quantization/gguf/gguf_kernel.cu"
     "${VLLM_SRC_DIR}/quantization/activation_kernels.cu"
     "${VLLM_SRC_DIR}/cuda_utils_kernels.cu"
@@ -356,6 +359,7 @@ if (BUILD_VLLM_SUBMODULE)
     "${VLLM_SRC_DIR}/moe/moe_align_sum_kernels.cu"
     #"${VLLM_SRC_DIR}/moe/moe_lora_align_sum_kernels.cu"
     "${VLLM_SRC_DIR}/moe/topk_softmax_kernels.cu"
+    "${VLLM_SRC_DIR}/moe/topk_softplus_sqrt_kernels.cu"
     "${VLLM_SRC_DIR}/moe/grouped_topk_kernels.cu")
 
   if (USE_MACA AND ENABLE_BLAS_API)
@@ -475,6 +479,7 @@ if (BUILD_DEFAULT_OP_SUBMODULE)
       "${MCOPLIB_SRCS_DIR}/fused_repeat_kv.cu"
       "${MCOPLIB_SRCS_DIR}/fused_bias_gelu.cu"
       "${MCOPLIB_SRCS_DIR}/fused_rms_norm_dq.cu"
+      "${MCOPLIB_SRCS_DIR}/fused_softplus_sqrt.cu"
       "${MCOPLIB_SRCS_DIR}/moe_swiglu_dq.cu"
       "${MCOPLIB_SRCS_DIR}/moe_softmax_topk.cu"
       "${MCOPLIB_SRCS_DIR}/all_reduce.cu"
@@ -488,6 +493,7 @@ if (BUILD_DEFAULT_OP_SUBMODULE)
       "${MCOPLIB_SRCS_DIR}/send_to_attention_node_pre_process.cu"
       "${MCOPLIB_SRCS_DIR}/int8_quant_kernels.cu"
       "${MCOPLIB_SRCS_DIR}/fused_add_layernorm_per_token_quant_padding_output.cu"
+      "${MCOPLIB_SRCS_DIR}/fused_add_gemma_rmsnorm_per_token_quant_padding_output.cu"
       "${MCOPLIB_SRCS_DIR}/rms_norm_dynamic_per_token_quant.cu"
       "${MCOPLIB_SRCS_DIR}/fused_moe_gate_deepseek.cu"
       "${MCOPLIB_SRCS_DIR}/gptq_marlin.cu"
@@ -687,7 +693,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
   #添加编译参数
   target_compile_options(sgl_grouped_gemm_mctlass_int8 PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>
+      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
       $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ > 

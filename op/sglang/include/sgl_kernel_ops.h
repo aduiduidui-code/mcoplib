@@ -336,7 +336,8 @@ void topk_sigmoid(
     torch::Tensor& topk_indices,
     torch::Tensor& gating_output,
     bool renormalize,
-    const c10::optional<torch::Tensor>& correction_bias);
+    const c10::optional<torch::Tensor>& correction_bias,
+    const c10::optional<torch::Tensor>& num_token_non_padded = c10::nullopt);
 
 void moe_sum_reduce(at::Tensor& input, at::Tensor& output, double routed_scaling_factor);
 

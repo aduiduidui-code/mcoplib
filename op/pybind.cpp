@@ -8,6 +8,7 @@
 #include "../include/fused_repeat_kv.h"
 #include "../include/fused_gelu.h"
 #include "../include/fused_rms_norm_dq.h"
+#include "../include/fused_softplus_sqrt.h"
 #include "../include/moe_swiglu_dq.h"
 #include "../include/moe_softmax_topk.h"
 #include "../include/all_reduce.h"
@@ -21,6 +22,7 @@
 #include "../include/send_to_attention_node_pre_process.h"
 #include "../include/int8_quant_kernel.h"
 #include "../include/fused_add_layernorm_per_token_quant_padding_output.h"
+#include "../include/fused_add_gemma_rmsnorm_per_token_quant_padding_output.h"
 #include "../include/rms_norm_dynamic_per_token_quant.h"
 #include "../include/fused_moe_gate_deepseek.h"
 #include "../include/glm_attention_prepare.h"
@@ -53,12 +55,20 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("rotary_pos_emb_backward", &rotary_pos_emb_backward);
     m.def("FusedAttentionPrepare", &FusedAttentionPrepare);
     m.def("fused_add_rms_norm_dynamic_per_token_quant_padding_output", &add_rms_norm_dynamic_per_token_quant_padding_output);
+    m.def("add_gemma_rms_norm_dynamic_per_token_quant_padding_output", &add_gemma_rms_norm_dynamic_per_token_quant_padding_output);
     m.def("rms_norm_dynamic_per_token_quant_custom", &rms_norm_dynamic_per_token_quant_custom);
-    
-
+    m.def("softplus_sqrt_f16", &softplus_sqrt_cuda, "Fused softplus + sqrt");
     m.def("recv_from_attention_node_post_process", &recv_from_attention_node_post_process);
     m.def("send_to_attention_node_pre_process", &send_to_attention_node_pre_process);
-    m.def("fused_silu_mul_dq_mask_quant", &fused_silu_mul_dq_mask_quant_pack);
+    m.def(
+        "fused_silu_mul_dq_mask_quant",
+        &fused_silu_mul_dq_mask_quant_pack,
+        py::arg("out"),
+        py::arg("input"),
+        py::arg("mask"),
+        py::arg("swiglu_limit") = 0.0f,
+        py::arg("weight") = py::none()
+        );
     m.def("fused_silu_mul_dq_mask_fp8_quant", &fused_silu_mul_dq_mask_quant_fp8_pack);
     m.def("fused_silu_mul_dq_reorder_quant", &fused_silu_mul_dq_quant_reordered_topk_interface);
     m.def("fused_silu_mul_dq_quant", &fused_silu_mul_dq_quant_interface);

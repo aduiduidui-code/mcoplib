@@ -240,13 +240,8 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.impl("moe_align_block_size", torch::kCUDA, &moe_align_block_size);
 
   m.def(
-      "topk_softmax(Tensor! topk_weights, Tensor! topk_indices, Tensor gating_output, bool renormalize, float "
-      "moe_softcapping, Tensor? correction_bias) -> ()");
-  m.impl("topk_softmax", torch::kCUDA, &topk_softmax);
-
-  m.def(
       "topk_sigmoid(Tensor! topk_weights, Tensor! topk_indices, Tensor gating_output, bool renormalize, Tensor? "
-      "correction_bias) -> ()");
+      "correction_bias, Tensor? num_token_non_padded=None) -> ()");
   m.impl("topk_sigmoid", torch::kCUDA, &topk_sigmoid);
 
   m.def("moe_sum_reduce(Tensor input, Tensor output, float routed_scaling_factor) -> ()");
@@ -703,7 +698,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "float downscale_freq_shift,"
       "float scale,"
       "int max_period) -> Tensor");
-  m.impl("timestep_embedding", torch::kCUDA, &timestep_embedding);
+  m.impl("timestep_embedding", torch::kCUDA, &timestep_embedding);  
 
 }
 

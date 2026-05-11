@@ -118,7 +118,7 @@ template<uint64_t MASK=0xffffffffffffffff>
 __device__ __forceinline__ void warpSortDescendingUpdate(float (&idx_and_weight)[2], int tid) {
 
     int64_t val = *(int64_t*)idx_and_weight;
-    for (int width = 2; width < 64; width <<= 1 ) {
+    for (int width = 2; width < 64; width <<=1 ) {
         for (int step = width >> 1; step > 0; step >>=1) {
             const bool direction = ((tid & width) == 0);
             int64_t other_temp_val = __shfl_xor_sync(MASK, val, step);
@@ -223,7 +223,9 @@ __launch_bounds__(TPB) __global__
     {
         const int idx = thread_row_offset + ii;
         const float val = toFloat(input[idx]);
-        const float softmax_val = expf(val - float_max) * normalizing_factor;
+        float softmax_val = expf(val - float_max) * normalizing_factor;
+        // Clamp NaN/Inf to 0 to prevent duplicate expert IDs downstream.
+        if (isnan(softmax_val) || isinf(softmax_val)) softmax_val = 0.f;
         output[idx] = softmax_val;
     }
 }
@@ -244,7 +246,9 @@ __launch_bounds__(TPB) __global__
     {
         const int idx = thread_row_offset + ii;
         const float val = toFloat(input[idx]);
-        const float sigmoid_val = 1.0f / (1.0f + __expf(-val));
+        float sigmoid_val = 1.0f / (1.0f + __expf(-val));
+        // Clamp NaN/Inf to 0 to prevent duplicate expert IDs downstream.
+        if (isnan(sigmoid_val) || isinf(sigmoid_val)) sigmoid_val = 0.f;
         output[idx] = sigmoid_val;
     }
 }
@@ -539,6 +543,19 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE_PARAM) __global__
       }
     }
 
+    // Fix: clamp NaN/Inf values to 0 to prevent duplicate expert IDs.
+    // NaN gating (from degenerate hidden states in CUDA graph padding) causes
+    // softmax to produce all-NaN, which makes the argmax loop always pick
+    // expert 0 for every top-k slot, producing duplicate expert IDs that
+    // crash FlashInfer's three-step MoE sort.
+    // With 0s, the argmax uses index tie-breaking to pick [0,1,2,...,k-1].
+#pragma unroll
+    for (int ii = 0; ii < VPT; ++ii) {
+      if (isnan(row_chunk[ii]) || isinf(row_chunk[ii])) {
+        row_chunk[ii] = 0.f;
+      }
+    }
+
     static constexpr int COLS_PER_GROUP_LDG = ELTS_PER_LDG * THREADS_PER_ROW;
 
     // If bias is not null, use biased value for selection
@@ -795,27 +812,26 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
     }
 }
 
-
-template <int VPT, typename IndType, typename InputType = float>
+template <int VPT, typename IndType,
+          typename InputType = float>
 __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* finished, float* output, const int num_rows, IndType* indices,
-                                           const int start_expert, const int end_expert, const int num_experts, const int rows_per_cta, const bool renormalize,
-                                           const float* bias, const int topk = 8)
+        const int start_expert, const int end_expert, const int num_experts, const int rows_per_cta, const bool renormalize,
+        const float* bias, const int topk = 8)
 {
     static_assert(std::is_same_v<InputType, float> || std::is_same_v<InputType, __nv_bfloat16> ||
-                  std::is_same_v<InputType, __half>,
+                      std::is_same_v<InputType, __half>,
                   "InputType must be float, __nv_bfloat16, or __half");
 
     int warps_per_row = (num_experts + 64 - 1) / 64;
     int threads_per_row = warps_per_row * 64;
-    int row_in_block = threadIdx.x / threads_per_row;
+    int row_in_block = threadIdx.x / threads_per_row; 
     const int thread_row = blockIdx.x * rows_per_cta + row_in_block;
     if(thread_row >= num_rows) {
         return;
     }
-
     const int warp_id = threadIdx.x / 64;
     const int tid_in_row = threadIdx.x % threads_per_row;
-
+    
     float row_val, row_val_for_choice = -3.4e38;
     if(tid_in_row < num_experts) {
         row_val = static_cast<float>(input[thread_row * num_experts + tid_in_row]);
@@ -828,8 +844,8 @@ __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* f
         }
     }
 
-    bool row_is_active = finished ? !finished[thread_row] : true;
-
+    bool row_is_active  = finished ? !finished[thread_row] : true;
+    
     int64_t expert_id_opt = static_cast<int64_t>(tid_in_row);
 
     float idx_and_weight[2];
@@ -850,7 +866,7 @@ __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* f
     float max_val_ordered;
     if(tid_in_row < 64){
         idx_and_weight_2[0] = -3.4e38;
-        *((int64_t*)idx_and_weight_2) |= (tid_in_row << 32);
+        *((int64_t*)idx_and_weight) |= (tid_in_row << 32);
         if(tid_in_row < topk * warps_per_row) {
             *(int64_t*)idx_and_weight_2 = *((int64_t*)shared_experts + (warp_id / warps_per_row) * (topk * warps_per_row) + tid_in_row);
         }
@@ -859,7 +875,7 @@ __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* f
             int64_t res = *(int64_t*)idx_and_weight_2;
             max_val_ordered = get_weight(res);
             int expert_id_ordered = (res >> 32);
-            // subtract bias, restore origin row_val(after topk)
+            // subtract bias，restore origin row_val(after topk)
             if (bias != nullptr) {
                 float bias_val = (expert_id_ordered < num_experts) ? bias[expert_id_ordered] : 0.0f;
                 max_val_ordered = max_val_ordered - bias_val;
@@ -873,8 +889,8 @@ __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* f
             // single) thread per row of the input/output matrices.
             const int idx = topk * thread_row + tid_in_row;
             indices[idx] = should_process_row ? (expert_id_ordered - start_expert) : num_experts;
-
-            // source_rows[idx] = tid_in_row * num_rows + thread_row;
+            
+        // source_rows[idx] = tid_in_row * num_rows + thread_row;
             if (renormalize) {
                 norm[row_in_block * topk + tid_in_row] = static_cast<float>(max_val_ordered);
             } else {
@@ -882,7 +898,7 @@ __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* f
             }
         }
     }
-
+    
     float* norm_val = norm + (blockDim.x / threads_per_row)*topk;
     if (renormalize) {
         __syncthreads();
@@ -1021,21 +1037,15 @@ void topkGatingKernelLauncher(
     (std::is_same_v<InputType, __nv_bfloat16> || std::is_same_v<InputType, __half>) ? 4 : 8;
 #endif
     if constexpr(SF == vllm::moe::SCORING_SIGMOID) {
-        if(num_experts <= 256 && topk <= 16) {
+        if(num_experts <= 256 && topk <=16 ) {
             int warps_per_row = (num_experts + 64 - 1) / 64;
             int threads_per_row = warps_per_row * 64;
             int blocksize = 256;
             int rows_per_cta = blocksize / threads_per_row;
-
-            topkGatingSigmoidCommonOpt<1, IndType, InputType>
-                <<< (num_tokens + rows_per_cta - 1) / rows_per_cta,
-                    blocksize,
-                    sizeof(float) * ((blocksize / threads_per_row) * topk + rows_per_cta),
-                    stream >>>
-            ((const InputType*)gating_output, nullptr, topk_weights, num_tokens, topk_indices, 0,
-            num_experts, num_experts, rows_per_cta, renormalize, bias, topk);
-
-            return;
+            topkGatingSigmoidCommonOpt<1, IndType, InputType><<<(num_tokens + rows_per_cta - 1) / rows_per_cta, blocksize, sizeof(float)*((blocksize / threads_per_row)*topk + rows_per_cta), stream>>>
+                ((const InputType*)gating_output, nullptr, topk_weights, num_tokens, topk_indices,0, num_experts, num_experts, rows_per_cta, 
+                renormalize, bias, topk);
+            return; 
         }
     }
     switch (num_experts) {
