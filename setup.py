@@ -82,6 +82,7 @@ def is_url_available(url: str) -> bool:
 # def get_nvcc_cuda_version() -> Version:
 #     """Get the CUDA version from nvcc.
 
+#     Adapted from https://github.com/NVIDIA/apex/blob/8b7a1ff183741dd8f9b87e7bafd04cfde99cea28/setup.py
 #     """
 #     assert CUDA_HOME is not None, "CUDA_HOME is not set"
 #     nvcc_output = subprocess.check_output([CUDA_HOME + "/bin/nvcc", "-V"],
@@ -307,8 +308,75 @@ class cmake_build_ext(build_ext):
             f"-j={num_jobs}",
             *[f"--target={name}" for name in targets],
         ]
-        subprocess.check_call([CMAKE_EXECUTABLE, *build_args], cwd=build_temp)
+        # Run cmake build and capture output for failure detection.
+        # The cmake_mock wrapper may swallow the ninja/make exit code,
+        # so we also check the output for failure indicators.
+        # We detect errors during line-by-line reading so the build
+        # stops immediately and the error is the last output printed.
+        failure_indicators = [
+            "ninja: build stopped",
+            "make: *** [",
+        ]
+        early_failure_indicators = [
+            "FAILED: ",
+            "error: ",
+        ]
+        build_proc = subprocess.Popen(
+            [CMAKE_EXECUTABLE, *build_args],
+            cwd=build_temp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        build_output_lines = []
+        build_failed = False
+        saw_early_failure = False
+        error_lines = []  # Collect error context for better diagnostics
+        for line in build_proc.stdout:
+            # Add prefix to error lines for easier identification
+            if any(indicator in line for indicator in early_failure_indicators):
+                sys.stdout.write(f"[ERROR] {line}")
+                sys.stdout.flush()
+                error_lines.append(line)
+            else:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            build_output_lines.append(line)
+            for indicator in early_failure_indicators:
+                if indicator in line:
+                    saw_early_failure = True
+            for indicator in failure_indicators:
+                if indicator in line:
+                    build_failed = True
+                    # Print error context immediately
+                    print("\n" + "="*60, file=sys.stderr)
+                    print("BUILD FAILED - Error detected during compilation", file=sys.stderr)
+                    print("="*60, file=sys.stderr)
+                    if error_lines:
+                        print("Error context:", file=sys.stderr)
+                        for err_line in error_lines[-5:]:  # Show last 5 error lines
+                            print(f"  {err_line}", file=sys.stderr, end='')
+                    print("="*60 + "\n", file=sys.stderr)
+                    build_proc.terminate()
+                    try:
+                        build_proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        build_proc.kill()
+                        build_proc.wait()
+                    break
+            if build_failed:
+                break
+        else:
+            build_proc.wait()
+            if build_proc.returncode != 0 or saw_early_failure:
+                build_failed = True
+        build_output = "".join(build_output_lines)
 
+        if build_failed:
+            raise RuntimeError(
+                f"CMake build failed (exit code {build_proc.returncode}). "
+                f"Check the build output above for errors."
+            )
 
         # Install the libraries
         for ext in cmake_extensions:
@@ -605,7 +673,7 @@ def write_git_info_file(target_path):
         branch, commit = get_git_branch_commit()
         if branch == None or commit == None :
             print(f"[warn ] canont Get mcoplib project Git info in directory:{os.getcwd()}.")
-            return None 
+            return None
         else:
             content = (
                 f'Mcoplib_Version = {mcoplib_version!r}\n'

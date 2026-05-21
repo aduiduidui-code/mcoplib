@@ -1,20 +1,15 @@
-// Copyright (c) 2025 MetaX Integrated Circuits (Shanghai) Co., Ltd. All rights reserved.
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/extension.h>
 #include <torch/torch.h>
 
 #include "../kernel/fused_bias_dropout_kernel.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 
 at::Tensor fused_bias_dropout(at::Tensor input, 
                                 at::Tensor residual, 
                                 float dropout_prob) {
 
-    DEBUG_TRACE_PARAMS(input, residual,dropout_prob);
-    DEBUG_DUMP_PARAMS(input, residual,dropout_prob);
     CHECK_DEVICE(input);
     CHECK_DEVICE(residual);
 

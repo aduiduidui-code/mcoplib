@@ -1,12 +1,9 @@
-// Copyright (c) 2025 MetaX Integrated Circuits (Shanghai) Co., Ltd. All rights reserved.
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/extension.h>
 #include <torch/torch.h>
 #include <cub/cub.cuh>
 #include "../kernel/moe_softmax_topk.cuh"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 // Constructs some constants needed to partition the work across threads at compile time.
 template <typename scalar_t, int EXPERTS, int BYTES_PER_LDG>
@@ -91,6 +88,7 @@ void topkGatingSoftmaxKernelLauncher(
     const int topk,
     const bool pre_softmax,
     cudaStream_t stream) {
+    (void)pre_softmax;
 
     if (num_experts >= 1024) {
         const int sortBlockSize = getSortSize(topk);
@@ -140,14 +138,6 @@ void topkGatingSoftmaxKernelLauncher(
         }
         return;
     }
-    // if (!pre_softmax) {
-    //     static constexpr int TPB = 256;
-    //     mc_moe_softmax_topk::moeTopKSoftmax<scalar_t, TPB><<<num_tokens, TPB, sizeof(scalar_t) * topk, stream>>>(
-    //         gating_output, topk_weights, topk_indicies,
-    //         num_experts, topk, 0, num_experts);
-    //     return;
-    // }
-
     static constexpr int WARPS_PER_TB = 4;
     switch (num_experts) {
         case 1:
@@ -219,8 +209,6 @@ void moe_softmax_topk(
     at::Tensor gating_output,
     const bool pre_softmax)               // [num_tokens, num_experts]
 {
-	DEBUG_TRACE_PARAMS(topk_weights, topk_indices, gating_output, pre_softmax);
-	DEBUG_DUMP_PARAMS(topk_weights, topk_indices, gating_output, pre_softmax);
     const int num_experts = gating_output.size(-1);
     const int num_tokens = gating_output.numel() / num_experts;
     const int topk = topk_weights.size(-1);

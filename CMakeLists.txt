@@ -130,6 +130,16 @@ if(NVCC_THREADS AND MCOPLIB_GPU_LANG STREQUAL "CUDA")
   list(APPEND MCOPLIB_GPU_FLAGS "--threads=${NVCC_THREADS}")
 endif()
 
+# Global warning suppression for CUDA compilation
+# These warnings do not affect kernel precision or functionality
+if(MCOPLIB_GPU_LANG STREQUAL "CUDA")
+  # Suppress warnings that do not affect kernel accuracy
+  # Note: Using --Wno-deprecated-declarations for nvcc compatible warning suppression
+  list(APPEND MCOPLIB_GPU_FLAGS
+    "--Wno-deprecated-declarations"
+  )
+endif()
+
 ####build sub project ENV
 
 option(BUILD_VLLM_SUBMODULE "Build the vllm op kernels subproject" ON)
@@ -428,6 +438,15 @@ if (BUILD_VLLM_SUBMODULE)
     ${BLAS_API_ARGS}
     USE_SABI 3
     WITH_SOABI)
+
+  target_compile_options(_moe_C PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:
+    --Wno-maca-min-blocks-per-multiprocessor
+    --Wno-ignored-attributes
+    --Wno-macro-redefined
+    --Wno-pass-failed
+    --Wno-maca-compat
+    >)
 endif()
 
 
@@ -462,6 +481,15 @@ if (BUILD_LMDEPLOY_SUBMODULE)
     INCLUDE_DIRECTORIES ${VLLM_SRC_DIR})
 
   set_target_properties(lmdeploy PROPERTIES PREFIX "" SUFFIX "${EXT_SUFFIX}")
+
+  target_compile_options(lmdeploy PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:
+    --Wno-maca-min-blocks-per-multiprocessor
+    --Wno-ignored-attributes
+    --Wno-macro-redefined
+    --Wno-pass-failed
+    --Wno-maca-compat
+    >)
 
   #############lmdeploy ops end ###############
 endif()
@@ -498,7 +526,9 @@ if (BUILD_DEFAULT_OP_SUBMODULE)
       "${MCOPLIB_SRCS_DIR}/fused_moe_gate_deepseek.cu"
       "${MCOPLIB_SRCS_DIR}/gptq_marlin.cu"
       "${MCOPLIB_SRCS_DIR}/moe_fused_gate_opt.cu"
-      "${MCOPLIB_SRCS_DIR}/glm_attention_prepare.cu")
+      "${MCOPLIB_SRCS_DIR}/glm_attention_prepare.cu"
+      "${MCOPLIB_SRCS_DIR}/fused_deepseekv4_qkv_rms_norm_rope.cu"
+      "${MCOPLIB_SRCS_DIR}/fused_split_qkv_gemma_rmsnorm_rope.cu")
 
   set_gencode_flags_for_srcs(
     SRCS "${MCOPLIB_EXT_SRC}"
@@ -515,6 +545,15 @@ if (BUILD_DEFAULT_OP_SUBMODULE)
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/kernel
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/include)
   set_target_properties(op PROPERTIES PREFIX "" SUFFIX "${EXT_SUFFIX}")
+
+  target_compile_options(op PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:
+    --Wno-maca-min-blocks-per-multiprocessor
+    --Wno-ignored-attributes
+    --Wno-macro-redefined
+    --Wno-pass-failed
+    --Wno-maca-compat
+    >)
 
 endif()
 
@@ -603,6 +642,7 @@ if (BUILD_SGLANG_SUBMODULE)
       $<$<COMPILE_LANGUAGE:CUDA>:-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -DCUTLASS_VERSIONS_GENERATED -DCUTE_USE_PACKED_TUPLE=1 -DCUTLASS_TEST_LEVEL=0 -DCUTLASS_TEST_ENABLE_CACHED_RESULTS=1 -DCUTLASS_DEBUG_TRACE_LEVEL=0 >
       $<$<COMPILE_LANGUAGE:CUDA>:--ptxas-options=-v --expt-relaxed-constexpr  -use-fast-math  -DTORCH_API_INCLUDE_EXTENSION_H >
       $<$<COMPILE_LANGUAGE:CUDA>:-DFLASHINFER_ENABLE_BF16 -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
+      $<$<COMPILE_LANGUAGE:CUDA>:--Wno-maca-min-blocks-per-multiprocessor --Wno-ignored-attributes --Wno-macro-redefined --Wno-pass-failed --Wno-maca-compat>
   )
 
 
@@ -635,6 +675,7 @@ if (BUILD_SGLANG_SUBMODULE)
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
+    $<$<COMPILE_LANGUAGE:CUDA>:--Wno-maca-min-blocks-per-multiprocessor --Wno-ignored-attributes --Wno-macro-redefined --Wno-pass-failed --Wno-maca-compat>
   )
 
   ############sglang moe_fused_w4a16##############
@@ -662,10 +703,11 @@ if (BUILD_SGLANG_SUBMODULE)
 
   #添加编译参数
   target_compile_options(sgl_moe_fused_w4a16 PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>
+      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
       $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
+      $<$<COMPILE_LANGUAGE:CUDA>:--Wno-maca-min-blocks-per-multiprocessor --Wno-ignored-attributes --Wno-macro-redefined --Wno-pass-failed --Wno-maca-compat>
   )
 
 
@@ -696,6 +738,7 @@ if (BUILD_SGLANG_SUBMODULE)
       $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
-      $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ > 
+      $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
+      $<$<COMPILE_LANGUAGE:CUDA>:--Wno-maca-min-blocks-per-multiprocessor --Wno-ignored-attributes --Wno-macro-redefined --Wno-pass-failed --Wno-maca-compat>
   )
 endif()

@@ -6,8 +6,6 @@
 #include "../kernel/utils.h"
 #include "../kernel/dispatch_utils.h"
 #include "../kernel/utils.cuh"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 template<typename T>
 static __device__ __forceinline__ float convert_to_float(T value) {
@@ -665,8 +663,6 @@ void rms_norm_dynamic_per_token_quant(
     torch::Tensor& after_norm,
     std::optional<at::Tensor> residual) {
   
-	DEBUG_TRACE_PARAMS(out, input, weight, smooth_scale, scales, var_epsilon, after_res, after_norm, residual);
-	DEBUG_DUMP_PARAMS(out, input, weight, smooth_scale, scales, var_epsilon, after_res, after_norm, residual);
   TORCH_CHECK(out.dtype() == torch::kInt8);
   TORCH_CHECK(out.is_contiguous() && input.is_contiguous());
   TORCH_CHECK(scales.dtype() == torch::kFloat32);
@@ -815,8 +811,6 @@ void head_rms_norm_dispatch(
 
 void head_rms_norm(torch::Tensor& out, torch::Tensor const& hidden_states, torch::Tensor const &weight, double const var_epsilon, int head_offset, int head_norm)
 {
-    DEBUG_TRACE_PARAMS(out, hidden_states, weight, var_epsilon, head_offset, head_norm);
-    DEBUG_TRACE_PARAMS(out, hidden_states, weight, var_epsilon, head_offset, head_norm);
     TORCH_CHECK(out.is_contiguous() && weight.is_contiguous() && hidden_states.is_contiguous());
     MOE_DISPATCH_FLOATING_TYPES(hidden_states.scalar_type(), "head_rms_norm_dispatch", [&]{
       head_rms_norm_dispatch<scalar_t>(out, hidden_states, weight, var_epsilon, head_offset, head_norm);
@@ -999,8 +993,6 @@ void rms_norm(
     bool rms_div
 )
 {
-  DEBUG_TRACE_PARAMS(out, input, weight, var_epsilon, after_res, residual, rms_div);
-	DEBUG_DUMP_PARAMS(out, input, weight, var_epsilon, after_res, residual, rms_div);
   TORCH_CHECK(out.is_contiguous() && input.is_contiguous());
   TORCH_CHECK(weight.is_contiguous());
   MOE_DISPATCH_FLOATING_TYPES(

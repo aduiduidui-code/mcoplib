@@ -1,18 +1,13 @@
-// Copyright (c) 2025 MetaX Integrated Circuits (Shanghai) Co., Ltd. All rights reserved.
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/extension.h>
 #include <torch/torch.h>
 
 #include "../kernel/fused_bias_swiglu_kernel.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 
 at::Tensor fused_bias_swiglu_fwd(at::Tensor input) {
 
-	DEBUG_TRACE_PARAMS(input);
-	DEBUG_DUMP_PARAMS(input);
     CHECK_DEVICE(input);
     CHECK_DIMS(input, 3);
     CHECK_CONTIGUOUS(input);
@@ -57,8 +52,6 @@ at::Tensor fused_bias_swiglu_fwd(at::Tensor input) {
 
 at::Tensor fused_bias_swiglu_bwd(at::Tensor input, at::Tensor grad_output) {
 
-	DEBUG_TRACE_PARAMS(input, grad_output);
-	DEBUG_DUMP_PARAMS(input, grad_output);
     const int stride_in = input.size(-1);
     const int stride_out = grad_output.size(-1);
     const int numel = grad_output.numel();

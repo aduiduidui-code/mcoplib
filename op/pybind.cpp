@@ -28,6 +28,8 @@
 #include "../include/glm_attention_prepare.h"
 #include "gptq_marlin.h"
 #include "fused_moe_gate_opt.h"
+#include "../include/fused_deepseekv4_qkv_rms_norm_rope.h"
+#include "../include/fused_split_gemma_rmsnorm_rope.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("fused_bias_dropout", &fused_bias_dropout);
@@ -114,4 +116,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("num_fused_shared_experts") = py::none(),  // 设置默认值为 None
         py::arg("routed_scaling_factor") = py::none()      // 设置默认值为 None
     );
+
+    m.def("fused_rms_norm_rope", &fused_rms_norm_rope, "Fused RMS Norm + RoPE for DeepSeekV4 (in-place)",
+        py::arg("q"),
+        py::arg("kv"),
+        py::arg("positions"),
+        py::arg("freqs_cis"),
+        py::arg("qk_rope_head_dim") = 64,
+        py::arg("eps") = 1e-6,
+        py::arg("weight_q") = py::none(),
+        py::arg("weight_kv") = py::none()
+    );
+    m.def("gemma_fused_rmsnorm_rope", &gemma_fused_rmsnorm_rope, "Gemma Fused RMSNorm and Neox RoPE Kernel");
 }

@@ -1,89 +1,92 @@
 # mcOpLib
-## Compilation
-note: Please prioritize compiling within the published vllm/sglang Docker images, for example:
+## 编译
+note: 请优先在vllm/sglang的发布的镜像中进行编译， 比如:
 ```shell
-docker run  -it  --name=mcoplib-build  --shm-size 16384m --device=/dev/dri --device=/dev/mxcd --group-add=video  --network=host --ulimit memlock=-1 --privileged=true   -v /sw_home/metax/:/home/metax  -v /pde_ai/models:/models  ai-master/maca/sglang:0.5.1-maca.ai20251013-45-torch2.6-py310-ubuntu22.04-amd64  /bin/bash
+docker run  -it  --name=mcoplib-build  --shm-size 16384m --device=/dev/dri --device=/dev/mxcd --group-add=video  --network=host --ulimit memlock=-1 --privileged=true   -v /sw_home/yiyu/:/home/yiyu  -v /pde_ai/models:/models  ai-master/maca/sglang:0.5.1-maca.ai20251013-45-torch2.6-py310-ubuntu22.04-amd64  /bin/bash
 ```
 
-Install build dependencies:
+安装编译依赖：
 ```shell
-# Install cmake. Note: If compiling inside a container and the code is stored on a network shared drive, you must first switch to the root user and install cmake as root.
+#安装cmake, 注意：如果是镜像中编译，又是把代码放在到网络共享盘中的，则先需要切换到root用户，在root用户下安装cmake
 pip3 install cmake==3.26.3
-# Install pybind11
-pip3 install pybind11
+#安装pybind11
+pip3 install pybind11 
 pip3 install build
-pip3 install setuptools-scm==8.0
+pip3 install setuptools-scm==8.0 
 ```
-Environment variable setup:
+环境变量设置：
 
 ```shell
-# Switch to the source code directory and execute the following command
+
+#切换到源码目录, 执行一下命令
 source env.sh
 ```
 
-Project source code compilation:
+项目源码编译：
 
 ```shell
 cd  /path/source/code/dir/mcoplib
-# Source code compilation command. This command will not display compilation logs. If you need to view compilation logs, add parameters: "-v", "-vv", or "-vvv".
-# After compilation is complete, the generated dynamic libraries and artifacts are located under `mcoplib` in the source directory. Incremental compilation is not supported.
+#源码编译命令， 该命令不会显示出编译信息，如果需要查看编译信息添加参数："-v" 或者 "-vv" 或者"-vvv"
+#编译完成后,生产的动态库及产物在源码目录下的mcoplib下面,不支持增量编译
 pip install -e . --no-build-isolation
 pip install -e . --no-build-isolation -v 
 pip install -e . --no-build-isolation -vv
 pip install -e . --no-build-isolation -vvv
-# mcoplib also supports compilation via python. The following two commands support incremental compilation:
+#mcoplib 也支持通过python来编译，如下两个命令支持增量编译：
 python setup.py develop
-# "build_ext --inplace" focuses only on the extension build strategy itself; "develop" performs "installation/registration/dependency handling" in addition to building.
+#build_ext --inplace 只关注扩展构建策略本身；develop 在构建的基础上还做“安装/注册/依赖处理”
 python setup.py build_ext --inplace
 
-# Print detailed WCUDA information during compilation
+#编译打印WCUDA详细信息
 export WCUDA_DEBUG=1
 ```
-note: When compiling using the pip install -e . --no-build-isolation -v (or -vv, -vvv) command, print messages within setup.py will not be printed immediately. This is because pip uses a pipe to capture stdout/stderr from the subprocess in order to echo it upon failure or merge the display in verbose mode. Therefore, print messages from setup.py will only be displayed after compilation fails or completes successfully.
+note: 通过pip install -e . --no-build-isolation -v或者-vv, -vvv命令编译时， 并不会打印出setup.py中的print信息，因为pip 对该子进程使用管道（pipe）捕获 stdout/stderr，以便在失败时回显或在 verbose 模式下合并显示， 也即只有在编译失败时或者编译成功完成后才会打印出setup.py中的print信息
+
 CUTLASS OP API接口编译控制
 ```shell
-#The compilation of CUTLASS OP API is enabled by default
-#The compilation of CUTLASS OP can also be controlled through environment variables
-#Enable
+#默认开启CUTLASS OP API的编译
+#也可以通过环境变量来控制CUTLASS OP 的编译
+#开启
 export ENABLE_BUILD_CUTLASS_OP=1
-#Disable
+#关闭
 export ENABLE_BUILD_CUTLASS_OP=0
 ```
-Project Packaging Command:
+
+项目打包命令：
 
 ```shell
-# First set environment variables
+#先设置环境变量
 cd  /path/source/code/dir
 python  -m build  --no-isolation
-# After the packaging command finishes, the whl package will be in the source code's dist directory, for example: mcoplib-0.1.0+maca3.0.0.8.torch2.6-cp310-cp310-linux_x86_64.whl
+#打包命令执行完成后， whl包在源码 dist目录下， 比如：mcoplib-0.1.0+maca3.0.0.8.torch2.6-cp310-cp310-linux_x86_64.whl
 ```
 
-## Installation
+## 安装
 
 ```shell
 pip3 install mcoplib-0.1.0+maca3.0.0.8.torch2.6-cp310-cp310-linux_x86_64.whl
 ```
-## mcoplib CV Op Kernel Compilation and Packaging
+## mcoplib CV Op Kernel 编译打包
 ```shell
-# Switch to the source directory (~/mcOpLib/gerrit_mcoplib/mcoplib_dev/mcoplib) and execute the following command
+#切换到源码目录（~/mcOplib/gerrit_mcoplib/mcoplib_dev/mcoplib）, 执行一下命令
 source env.sh
 cd /path/source/code/dir/mcoplib/op/cv/
-# Execute commands: Configure + Build
+#执行命令 配置 + 构建
 cmake_maca -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake_maca --build build -j$(nproc)
-# Generate deb
+# 生成 deb
 cd build
 cpack -G DEB
 ```
 
-### CV Op Deb Package Installation
+### CV Op Deb包安装
 
 ```shell
-# cd pkg directory
+#cd pkg 目录
 dpkg -i mcoplib_cv-0.2.0-Linux.deb
-# sudo
+#sudo
 sudo dpkg -i mcoplib_cv-0.2.0-Linux.deb
-# After installation is complete, the /opt/maca-ai/mcoplib directory structure is as follows:
+#安装完成后，/opt/maca-ai/mcoplib目录结构如下：
 root@lt-srv-10-2-182-63:~/mcoplib# tree
 .
 |-- include
@@ -98,62 +101,58 @@ root@lt-srv-10-2-182-63:~/mcoplib# tree
     `-- libmcoplib_cv.so
 ```
 
-### Mcoplib  cv Op kernel Test
+### Mcoplib  cv Op kernel 测试
 ```shell
-# Testing the mcoplib cv op kernel requires installing the mcoplib_cv-0.2.0-Linux.deb package first.
-# After installing the deb package, the mcoplib cv library and header files will be located in the /opt/maca-ai/mcoplib directory.
+#mcoplib cv op kernel测试需要先安装mcoplib_cv-0.2.0-Linux.deb包, deb包安装后会/opt/maca-ai/mcoplib目录下存在mcoplib cv库及头文件
 dpkg -i mcoplib_cv-0.2.0-Linux.deb
-# Switch to the source code directory (~/mcOplib/gerrit_mcoplib/mcoplib_dev/mcoplib) and execute the following commands:
+#切换到源码目录（~/mcOplib/gerrit_mcoplib/mcoplib_dev/mcoplib）, 执行一下命令
 source env.sh
 cd  /path/source/code/dir/mcoplib/unit_test/cpp
 mkdir build
 cmake_maca .. && make_maca
 ```
 
-## Installation for Enabling VLLM Custom Operators
+## VLLM自定义算子使能安装
 
 ```shell
 pip3 install mcoplib-0.1.0+maca3.0.0.8.torch2.6-cp310-cp310-linux_x86_64.whl
 ```
 
-## Get Version Information
+## 获取版本信息
 ```shell
-# After installing the mcoplib package, execute the following command in the shell terminal to retrieve version information:
+#安装mcoplib包后， shell终端执行一下命令获取版本信息
 mcoplib_version
 ````
 
-## Control Compilation via Environment Variables
+##  通过环境变量控制编译
 
 ```shell
 
-# The BUILD_VLLM_SUBMODULE environment variable controls whether vllm op operators are compiled; enabled by default.
+#BUILD_VLLM_SUBMODULE 环境变量控制vllm op 算子是否编译，默认开启
 export BUILD_VLLM_SUBMODULE=OFF 
-# The BUILD_SGLANG_SUBMODULE environment variable controls whether sglang op operators are compiled; enabled by default.
-# The sglang inference framework generally depends on the vllm op kernel.
+#BUILD_SGLANG_SUBMODULE 环境变量控制sglang op 算子是否编译， 默认开启， sglang 推理框架中一般都依赖vllm op kernel
 export  BUILD_SGLANG_SUBMODULE=OFF 
-# The BUILD_LMDEPLOY_SUBMODULE environment variable controls whether lmdeploy op operators are compiled; enabled by default.
+#BUILD_LMDEPLOY_SUBMODULE 环境变量控制lmdeploy op 算子是否编译， 默认开启
 export BUILD_LMDEPLOY_SUBMODULE=OFF
-# The BUILD_DEFAULT_OP_SUBMODULE environment variable controls whether default op operators are compiled; enabled by default.
-# Under normal circumstances, default operators must be enabled as they are reused.
-# Additionally, when importing mcoplib, it defaults to importing mcoplib.op; if disabled, it will cause an import error.
+#BUILD_DEFAULT_OP_SUBMODULE 环境变量控制默认 op 算子是否编译， 默认开启， 一般情况下默认算子必须开启，存在复用，且import mcoplib时，默认会import mcoplib.op， 如何开启，会导致import错误
 export BUILD_DEFAULT_OP_SUBMODULE=OFF 
-# Control over multiple operator compilation modules
+#多个算子编译模块控制
 export BUILD_VLLM_SUBMODULE=OFF  BUILD_SGLANG_SUBMODULE=OFF BUILD_LMDEPLOY_SUBMODULE=OFF
 ```
 
-## Dynamic control operator input parameter information terminal output or parameter dump to the local disk
+## 动态控制算子入参信息终端输出或参数dump到本地磁盘
 ```shell
-# Enable operator input parameter information to be output to the terminal (including data type, shape and other information)
+#开启算子入参信息输出到终端（包括数据类型，shape 等信息）
 export MCOP_DEBUG_TRACE=1
-# enable dump
+# 启用 dump
 export MCOP_DEBUG_PARAMS_DUMP=1
 
-# (Optional) Configure the number of samples
+# （可选）配置采样数量
 export MCOP_TENSOR_DUMP_SAMPLE_SIZE=20
-# or dump all tensor data (optional)
+# 或 dump 所有 tensor 数据（可选）
 export MCOP_TENSOR_DUMP_FULL=1
 ```
-### Operator parameter dump local example
+### 算子入参Dump本地示例
 
 ```json
 {
@@ -257,7 +256,7 @@ export MCOP_TENSOR_DUMP_FULL=1
 ### samples
 
 ```python
-# Example of calling operators in mcoplib op and vllm _C
+#mcoplib op  以及 vllm  _C中算子调用示例
 import contextlib
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -302,7 +301,7 @@ def rms_norm(
     weight = weight.to(torch.float32)
     output = torch.empty_like(hidden_states)
    
-    ops.rms_norm(output, hidden_states, weight, epsilon, None, None,False)# Operators in the mcoplib op module
+    ops.rms_norm(output, hidden_states, weight, epsilon, None, None,False)#mcoplib op模块中的算子
 
 # page attention ops
 def paged_attention_v1(
@@ -326,7 +325,7 @@ def paged_attention_v1(
     blocksparse_block_size: int = 64,
     blocksparse_head_sliding_step: int = 0,
 ) -> None:
-    # Invocation of the paged_attention_v1 operator in the mcoplib vllm op kernel _C module
+    #mcoplib vllm 中的op kernel _C模块的paged_attention_v1算子调用
     torch.ops._C.paged_attention_v1(
         out, query, key_cache, value_cache, num_kv_heads, scale, block_tables,
         seq_lens, block_size, max_seq_len, alibi_slopes, kv_cache_dtype,
@@ -334,7 +333,7 @@ def paged_attention_v1(
         blocksparse_vert_stride, blocksparse_block_size,
         blocksparse_head_sliding_step)
 
-# sglang sgl_kernel invocation example
+#sglang sgl_kernel调用示例
 
 import torch
 
@@ -356,11 +355,11 @@ except ImportError as e:
 
 
 
-# Function: In MLA, apply rotary_emb to q, apply rms_normal to latent_cache, update latent_cache and kv_a, then apply rotary_emb to latent_cache.
-#           Call torch's kv_b_proj to calculate kv, copy data from kv to k and v, and copy data from latent_cache to k.
-# Input:
-# Output:
-# Limitations:
+#功能：mla中，对q做rotary_emb，对latent_cache做rms_normal，更新latent_cache和kv_a，之后对latent_cache做rotary_emb。
+#     调用torch的kv_b_proj计算kv，将数据从kv拷贝到k和v，从latent_cache中拷贝数据到k
+#输入：
+#输出：
+#限制：
 def fused_mla_normal_rotary_emb(
     kv_a:torch.tensor,
     kv_b_proj,
@@ -392,18 +391,23 @@ def fused_mla_normal_rotary_emb(
 
 
 ## QA
-- Executing python -m build --no-isolation fails with error: /opt/conda/bin/python: No module named build.__main__; 'build' is a package and cannot be directly executed
-    Answer：When Python tries to execute python -m build, it cannot find the build/__main__.py file, so it cannot run build as an executable module (i.e., __main__ module). The build in your current environment is not the official PyPA build toolkit. You need to install the build package: pip install --force-reinstall build
-- After building and packaging mcoplib, version information cannot be displayed, and there is no version file in the package directory.
-    Answer: This is caused by the lack of the git command in the build environment. Please install the git command in the build environment.
-- Error during compilation: FileNotFoundError: [Errno 2] No such file or directory: 'cmake_maca'
-    Answer: Please execute the environment variable script env.sh before compiling: cd /code/dir/mcoplib/ && source env.sh
+- 执行python  -m build  --no-isolation 报错：/opt/conda/bin/python: No module named build.__main__; 'build' is a package and cannot be directly executed
+
+    Answer：Python 尝试执行 `python -m build` 时，找不到 `build/_main_.py` 文件，所以无法将 `build` 当作一个 **可执行模块**（即 `__main__` 模块）运行， 你当前环境中的 `build` 不是 PyPA 官方的 `build` 工具包.
+需要安装build包： pip install --force-reinstall build
+- mcoplib构建打包后， 无法显示版本信息，包文件目录下没有version文件
+    Answer: 这是因为构建环境中没有安装git命令导致的，请在构建环境中安装git命令
+- 编译时出现错误：FileNotFoundError: [Errno 2] No such file or directory: 'cmake_maca'
+    Answer: 请在编译前执行下环境变量env.sh，cd /code/dir/mcoplib/ && source env.sh
+- 编译时报错：cmake error while loading shared libraries: libssl.so.1.1: cannot open shared object file: No such file or directory
+Traceback (most recent call last):
+    Answer: cmake版本太高，请安装低版本，镜像中的open-ssl版本很低与高版本的cmake无法匹配，所有报错，请卸载高版本cmake，安装低版本的cmake，pip3 install cmake==3.26.3 -i  https://repo.metax-tech.com/r/pypi/simple
 
 ## Release
 ### Release 0.4.4
 - add cv op kernel
 - support sglang  0.5.10 op
-- optimize mcoplib project build 
+- optimize mcoplib project build
 - support mxbench for auto test op kernel `s perfromance
 - support profiler tools check op kernel `s perfromance
 - support for vllm 0.20.0  op kernels
@@ -415,7 +419,7 @@ def fused_mla_normal_rotary_emb(
 - support auto build mxbench running env by shell script
 - support auto test torch/py/c op api by mxbench cmd
 
-## Acknowledgment
+## Authors and acknowledgment
 Show your appreciation to those who have contributed to the project.
 
 ## License

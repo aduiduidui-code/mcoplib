@@ -10,6 +10,7 @@
 
 template<typename T, int ELTS_PER_LDG>
 __global__ void reduce_kernel_max_vec(T* input, T* output, int num_tokens, int hidden_size, int num_vec) {
+    (void)num_tokens;
     T* thread_read_ptr = input + blockIdx.x * hidden_size;
     using AccessType = AlignedArrayI4<T, ELTS_PER_LDG>;
     T row_chunk[ELTS_PER_LDG];
@@ -35,6 +36,7 @@ __global__ void reduce_kernel_max_vec(T* input, T* output, int num_tokens, int h
 
 template<typename T, int ELTS_PER_LDG>
 __global__ void reduce_kernel_sum_vec(T* input, T* output, int num_tokens, int hidden_size, int num_vec) {
+    (void)num_tokens;
     T* thread_read_ptr = input + blockIdx.x * hidden_size;
     using AccessType = AlignedArrayI4<T, ELTS_PER_LDG>;
     T row_chunk[ELTS_PER_LDG];
@@ -61,6 +63,7 @@ __global__ void reduce_kernel_sum_vec(T* input, T* output, int num_tokens, int h
 
 template<typename T>
 __global__ void reduce_kernel_max (T* input, T* output, int num_tokens, int hidden_size) {
+    (void)num_tokens;
     if (threadIdx.x >= hidden_size) return;
     T* thread_read_ptr = input + blockIdx.x * hidden_size;
     T val = *thread_read_ptr;
@@ -80,6 +83,7 @@ __global__ void reduce_kernel_max (T* input, T* output, int num_tokens, int hidd
 
 template<typename T>
 __global__ void reduce_kernel_sum (T* input, T* output, int num_tokens, int hidden_size) {
+    (void)num_tokens;
     T* thread_read_ptr = input + blockIdx.x * hidden_size;
     float val = 0.0f;
 
