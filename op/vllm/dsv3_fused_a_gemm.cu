@@ -30,8 +30,6 @@
 
 #include <cstdlib>
 #include <mutex>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace {
 
@@ -704,8 +702,6 @@ template void invokeFusedAGemm<__nv_bfloat16, 7168, 2112, 16>(
 
 void dsv3_fused_a_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
                        torch::Tensor const& mat_b) {
-  DEBUG_TRACE_PARAMS(output, mat_a, mat_b);
-  DEBUG_DUMP_PARAMS(output, mat_a, mat_b);
   TORCH_CHECK(mat_a.dim() == 2 && mat_b.dim() == 2 && output.dim() == 2);
   int const num_tokens = mat_a.size(0);
   int const hd_in = mat_a.size(1);

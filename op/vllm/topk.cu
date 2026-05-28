@@ -11,8 +11,6 @@
 
 #include <cub/cub.cuh>
 
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace vllm {
 
@@ -342,8 +340,6 @@ void large_context_topk(
     const torch::Tensor& logits, torch::Tensor& indices,
     const torch::Tensor& seq_lens,
     std::optional<torch::Tensor> row_starts = std::nullopt) {
-  DEBUG_TRACE_PARAMS(logits, indices, seq_lens, row_starts);
-  DEBUG_DUMP_PARAMS(logits, indices, seq_lens, row_starts);
   TORCH_CHECK(logits.is_cuda(), "logits must be a CUDA tensor");
   TORCH_CHECK(indices.is_cuda(), "indices must be a CUDA tensor");
   TORCH_CHECK(seq_lens.is_cuda(), "seq_lens must be a CUDA tensor");

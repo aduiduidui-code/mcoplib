@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 // Adapted from
 // https://github.com/vllm-project/vllm/blob/eb59b5a6cba6727d3727c0372258db9002f687c1/csrc/quantization/awq/gemm_kernels.cu#L350
 #include <c10/cuda/CUDAGuard.h>
@@ -8,8 +7,6 @@
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #include <cuda_bf16.h>
 #endif
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 template <int lut>
 __device__ inline int lop3(int a, int b, int c) {
@@ -187,8 +184,6 @@ __global__ void __launch_bounds__(256) dequantize_weights(
 }
 
 torch::Tensor awq_dequantize(torch::Tensor qweight, torch::Tensor scales, torch::Tensor qzeros) {
-  DEBUG_TRACE_PARAMS(qweight, scales, qzeros);
-  DEBUG_DUMP_PARAMS(qweight, scales, qzeros);
   int qweight_rows = qweight.size(0);
   int qweight_cols = qweight.size(1);
   int group_size = qweight_rows / scales.size(0);

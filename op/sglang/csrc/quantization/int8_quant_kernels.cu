@@ -12,8 +12,6 @@
   #include <hipcub/util_type.hpp>
   #include <hipcub/hipcub.hpp>
 #endif
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 static __forceinline__ __device__ int8_t float_to_int8_rn(float x) {
 #ifdef USE_ROCM
@@ -1538,19 +1536,7 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
         
     } else if(N == 8&&(inner_hidden_size & (N - 1)) == 0 && (out_stride & (N -1)) == 0) {
         int base = blocksize * N;
-        if(inner_hidden_size <= 64 * N) {
-            constexpr int NUM_THREADS = 64;
-            gridsize = gridsize * 8;
-            silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS);
-        } else if(inner_hidden_size <= 128 * N) {
-            constexpr int NUM_THREADS = 128;
-            gridsize = gridsize * 4;
-            silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS);
-        } else if(inner_hidden_size <= 256 * N) {
-            constexpr int NUM_THREADS = 256;
-            gridsize = gridsize * 2;
-            silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS);
-        } else if(inner_hidden_size <= base) {
+        if(inner_hidden_size <= base) {
             silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize);
         } else if(inner_hidden_size <= base*2) {
             silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize);
@@ -1614,8 +1600,6 @@ void static_scaled_int8_quant(torch::Tensor& out,          // [..., hidden_size]
                               torch::Tensor const& input,  // [..., hidden_size]
                               torch::Tensor const& scale,
                               c10::optional<torch::Tensor> const& azp) {
-  DEBUG_TRACE_PARAMS(out, input, scale, azp);
-  DEBUG_DUMP_PARAMS(out, input, scale, azp);
   TORCH_CHECK(input.is_contiguous());
   TORCH_CHECK(out.is_contiguous());
   TORCH_CHECK(scale.numel() == 1);
@@ -1647,8 +1631,6 @@ void dynamic_scaled_int8_quant(
     torch::Tensor& out,          // [..., hidden_size]
     torch::Tensor const& input,  // [..., hidden_size]
     torch::Tensor& scales, c10::optional<torch::Tensor> const& azp) {
-  DEBUG_TRACE_PARAMS(out, input, scales, azp);
-  DEBUG_DUMP_PARAMS(out, input, scales, azp);
   TORCH_CHECK(input.is_contiguous());
   TORCH_CHECK(out.is_contiguous());
   TORCH_CHECK(scales.is_contiguous());
@@ -1827,8 +1809,6 @@ void fused_silu_mul_dq_quant_interface(
     torch::Tensor& scale,   
     torch::Tensor const& input)
 {
-  DEBUG_TRACE_PARAMS(out, scale, input);
-  DEBUG_DUMP_PARAMS(out, scale, input);
   TORCH_CHECK(input.is_contiguous());
   TORCH_CHECK(scale.is_contiguous());
   TORCH_CHECK(out.is_contiguous());

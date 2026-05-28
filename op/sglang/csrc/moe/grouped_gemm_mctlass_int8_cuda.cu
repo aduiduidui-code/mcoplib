@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #pragma once
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -11,8 +10,6 @@
 #include "mctlass/half.h"
 #include "mctlass/layout/matrix.h"
 #include "mctlass/epilogue/thread/scale_type.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 using ElementA = int8_t;
 using ElementB = int8_t;
@@ -45,8 +42,6 @@ using mctlassContiguousGroupedGemmOp = mctlassContiguousGroupedGemm<
 
 int32_t get_block_size_m(int32_t batch_size, int32_t m, int32_t n, int32_t k)
 {
-    DEBUG_TRACE_PARAMS(batch_size, m, n, k);
-    DEBUG_DUMP_PARAMS(batch_size, m, n, k);
     mctlassContiguousGroupedGemmOp mctlass_op;
     int blocksizeM = mctlass_op.get_blocksize_m(batch_size, m, n, k);
     return blocksizeM;
@@ -56,8 +51,6 @@ void grouped_gemm_mctlass_kernel_int8(
     torch::Tensor const& a, torch::Tensor const& b, torch::Tensor& c, int32_t batch_size, int32_t m, int32_t n, int32_t k,
     torch::Tensor const& seg_indptr, torch::Tensor const& weight_indices, torch::Tensor const& m_num_tiles_indptr, torch::Tensor const& scale_a, torch::Tensor const& scale_b)
 {
-    DEBUG_TRACE_PARAMS(a, b, c, batch_size, m, n, k, seg_indptr, weight_indices, m_num_tiles_indptr, scale_a, scale_b);
-    DEBUG_DUMP_PARAMS(a, b, c, batch_size, m, n, k, seg_indptr, weight_indices, m_num_tiles_indptr, scale_a, scale_b);
     auto a_ptr = static_cast<ElementA*>(a.data_ptr());
     auto b_ptr = static_cast<ElementB*>(b.data_ptr());
     auto c_ptr = static_cast<ElementC*>(c.data_ptr());

@@ -1,5 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
+ * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// Adapted from
+// https://github.com/NVIDIA/TensorRT-LLM/blob/main/cpp/tensorrt_llm/kernels/fusedQKNormRopeKernel.cu
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -22,8 +25,6 @@
 #include <cuda_runtime.h>
 #include <torch/all.h>
 #include <torch/cuda.h>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 #include <cmath>
 
@@ -375,8 +376,6 @@ void fused_qk_norm_rope(
     double high,    // threshold for low frequency
     double attention_factor,  // attention_factor applied on cos and sin
     int64_t rotary_dim) {
-  DEBUG_TRACE_PARAMS(qkv, num_heads_q, num_heads_k, num_heads_v, head_dim, eps, q_weight, k_weight, base, is_neox, position_ids, factor, low, high, attention_factor, rotary_dim);
-  DEBUG_DUMP_PARAMS(qkv, num_heads_q, num_heads_k, num_heads_v, head_dim, eps, q_weight, k_weight, base, is_neox, position_ids, factor, low, high, attention_factor, rotary_dim);
   // Input validation
   TORCH_CHECK(qkv.dim() == 2, "QKV tensor must be 2D: [num_tokens, (num_heads_q+num_heads_k+num_heads_v)*head_dim]");
   TORCH_CHECK(position_ids.dim() == 1, "Position IDs must be 1D: [num_tokens]");

@@ -6,12 +6,8 @@
 #include "core/scalar_type.hpp"
 
 #include <vector>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 torch::Tensor weak_ref_tensor(torch::Tensor& tensor) {
-  DEBUG_TRACE_PARAMS(tensor);
-  DEBUG_DUMP_PARAMS(tensor);
   // Ensure tensor is on CUDA
   if (!tensor.is_cuda()) {
     throw std::runtime_error("Tensor must be on CUDA device");
@@ -56,12 +52,12 @@ void paged_attention_v2(
     const int64_t blocksparse_vert_stride, const int64_t blocksparse_block_size,
     const int64_t blocksparse_head_sliding_step);
 
-void merge_attn_states(
-    torch::Tensor& output, std::optional<torch::Tensor> output_lse,
-    const torch::Tensor& prefix_output, const torch::Tensor& prefix_lse,
-    const torch::Tensor& suffix_output, const torch::Tensor& suffix_lse,
-    const std::optional<int64_t> prefill_tokens_with_context,
-    const std::optional<torch::Tensor>& output_scale = std::nullopt);
+void merge_attn_states(torch::Tensor& output,
+                       std::optional<torch::Tensor> output_lse,
+                       const torch::Tensor& prefix_output,
+                       const torch::Tensor& prefix_lse,
+                       const torch::Tensor& suffix_output,
+                       const torch::Tensor& suffix_lse);
 
 void convert_vertical_slash_indexes(
     torch::Tensor& block_count,      // [BATCH, N_HEADS, NUM_ROWS]
@@ -94,24 +90,11 @@ void rms_norm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight,
 void fused_add_rms_norm(torch::Tensor& input, torch::Tensor& residual,
                         torch::Tensor& weight, double epsilon);
 
-//Todo：fused_qk_norm_rope算子新增参数，部分依赖（async_util.cuh），先保持原样
-// void fused_qk_norm_rope(torch::Tensor& qkv, int64_t num_heads_q,
-//                         int64_t num_heads_k, int64_t num_heads_v,
-//                         int64_t head_dim, double eps, torch::Tensor& q_weight,
-//                         torch::Tensor& k_weight, torch::Tensor& cos_sin_cache,
-//                         bool is_neox, torch::Tensor& position_ids,
-//                         int64_t forced_token_heads_per_warp);
-
 void fused_qk_norm_rope(torch::Tensor& qkv, int64_t num_heads_q,
                         int64_t num_heads_k, int64_t num_heads_v,
                         int64_t head_dim, double eps, torch::Tensor& q_weight,
                         torch::Tensor& k_weight, torch::Tensor& cos_sin_cache,
                         bool is_neox, torch::Tensor& position_ids);
-//Todo：该算子后续替换成int8量化
-void fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
-    torch::Tensor& q, torch::Tensor const& kv, torch::Tensor& k_cache,
-    torch::Tensor const& slot_mapping, torch::Tensor const& position_ids,
-    torch::Tensor const& cos_sin_cache, double eps, int64_t cache_block_size);
 
 void apply_repetition_penalties_(torch::Tensor& logits,
                                  const torch::Tensor& prompt_mask,
@@ -129,11 +112,6 @@ void top_k_per_row_decode(const torch::Tensor& logits, int64_t next_n,
                           int64_t numRows, int64_t stride0, int64_t stride1,
                           int64_t topK);
 
-//Todo:该算子下面large_context_topk转换，依赖PTX（persistent_topk.cuh），先保持原样
-// void persistent_topk(const torch::Tensor& logits, const torch::Tensor& lengths,
-//                      torch::Tensor& output, torch::Tensor& workspace, int64_t k,
-//                      int64_t max_seq_len);
-//该算子在topk.cu中
 void large_context_topk(const torch::Tensor& score, torch::Tensor& indices,
                         const torch::Tensor& lengths,
                         std::optional<torch::Tensor> row_starts_opt);
@@ -163,16 +141,9 @@ void rms_norm_per_block_quant(torch::Tensor& out, torch::Tensor const& input,
                               std::optional<torch::Tensor> residual,
                               int64_t group_size, bool is_scale_transposed);
 
-void silu_and_mul_per_block_quant(torch::Tensor& out,
-                                  torch::Tensor const& input,
-                                  torch::Tensor& scales, int64_t group_size,
-                                  std::optional<torch::Tensor> scale_ub,
-                                  bool is_scale_transposed);
-
 void rotary_embedding(torch::Tensor& positions, torch::Tensor& query,
                       std::optional<torch::Tensor> key, int64_t head_size,
-                      torch::Tensor& cos_sin_cache, bool is_neox,
-                      int64_t rope_dim_offset, bool inverse);
+                      torch::Tensor& cos_sin_cache, bool is_neox);
 
 void batched_rotary_embedding(torch::Tensor& positions, torch::Tensor& query,
                               std::optional<torch::Tensor> key,
@@ -181,8 +152,6 @@ void batched_rotary_embedding(torch::Tensor& positions, torch::Tensor& query,
                               torch::Tensor& cos_sin_cache_offsets);
 
 void silu_and_mul(torch::Tensor& out, torch::Tensor& input);
-
-void silu_and_mul_clamp(torch::Tensor& out, torch::Tensor& input, double limit);
 
 void silu_and_mul_quant(torch::Tensor& out, torch::Tensor& input,
                         torch::Tensor& scale);
@@ -362,15 +331,3 @@ void selective_scan_fwd(const torch::Tensor& u, const torch::Tensor& delta,
 
 void dsv3_fused_a_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
                        torch::Tensor const& mat_b);
-
-// Todo:PTX2CPP，minimax_reduce_rms_kernel中有两个device函数依赖PTX
-// torch::Tensor minimax_allreduce_rms(torch::Tensor const& input,
-//                                     torch::Tensor const& norm_weight,
-//                                     torch::Tensor workspace, int64_t const rank,
-//                                     int64_t const nranks, double const eps);
-// std::tuple<torch::Tensor, torch::Tensor> minimax_allreduce_rms_qk(
-//     torch::Tensor qkv, torch::Tensor const& norm_weight_q,
-//     torch::Tensor const& norm_weight_k, torch::Tensor workspace,
-//     int64_t const q_size, int64_t const kv_size, int64_t const rank,
-//     int64_t const nranks, double const eps);
-// 

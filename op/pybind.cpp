@@ -8,7 +8,6 @@
 #include "../include/fused_repeat_kv.h"
 #include "../include/fused_gelu.h"
 #include "../include/fused_rms_norm_dq.h"
-#include "../include/fused_softplus_sqrt.h"
 #include "../include/moe_swiglu_dq.h"
 #include "../include/moe_softmax_topk.h"
 #include "../include/all_reduce.h"
@@ -28,8 +27,6 @@
 #include "../include/glm_attention_prepare.h"
 #include "gptq_marlin.h"
 #include "fused_moe_gate_opt.h"
-#include "../include/fused_deepseekv4_qkv_rms_norm_rope.h"
-#include "../include/fused_split_gemma_rmsnorm_rope.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("fused_bias_dropout", &fused_bias_dropout);
@@ -59,18 +56,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("fused_add_rms_norm_dynamic_per_token_quant_padding_output", &add_rms_norm_dynamic_per_token_quant_padding_output);
     m.def("add_gemma_rms_norm_dynamic_per_token_quant_padding_output", &add_gemma_rms_norm_dynamic_per_token_quant_padding_output);
     m.def("rms_norm_dynamic_per_token_quant_custom", &rms_norm_dynamic_per_token_quant_custom);
-    m.def("softplus_sqrt_f16", &softplus_sqrt_cuda, "Fused softplus + sqrt");
+    
+
     m.def("recv_from_attention_node_post_process", &recv_from_attention_node_post_process);
     m.def("send_to_attention_node_pre_process", &send_to_attention_node_pre_process);
-    m.def(
-        "fused_silu_mul_dq_mask_quant",
-        &fused_silu_mul_dq_mask_quant_pack,
-        py::arg("out"),
-        py::arg("input"),
-        py::arg("mask"),
-        py::arg("swiglu_limit") = 0.0f,
-        py::arg("weight") = py::none()
-        );
+    m.def("fused_silu_mul_dq_mask_quant", &fused_silu_mul_dq_mask_quant_pack);
     m.def("fused_silu_mul_dq_mask_fp8_quant", &fused_silu_mul_dq_mask_quant_fp8_pack);
     m.def("fused_silu_mul_dq_reorder_quant", &fused_silu_mul_dq_quant_reordered_topk_interface);
     m.def("fused_silu_mul_dq_quant", &fused_silu_mul_dq_quant_interface);
@@ -116,16 +106,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("num_fused_shared_experts") = py::none(),  // 设置默认值为 None
         py::arg("routed_scaling_factor") = py::none()      // 设置默认值为 None
     );
-
-    m.def("fused_rms_norm_rope", &fused_rms_norm_rope, "Fused RMS Norm + RoPE for DeepSeekV4 (in-place)",
-        py::arg("q"),
-        py::arg("kv"),
-        py::arg("positions"),
-        py::arg("freqs_cis"),
-        py::arg("qk_rope_head_dim") = 64,
-        py::arg("eps") = 1e-6,
-        py::arg("weight_q") = py::none(),
-        py::arg("weight_kv") = py::none()
-    );
-    m.def("gemma_fused_rmsnorm_rope", &gemma_fused_rmsnorm_rope, "Gemma Fused RMSNorm and Neox RoPE Kernel");
 }
