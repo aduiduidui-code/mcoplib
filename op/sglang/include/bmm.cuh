@@ -248,19 +248,33 @@ namespace fused_mla {
         // }
         uint32_t hdx = bid / bnxbm_size;
         uint32_t group_id = tid / 16;    // 0~15, kindex
-        uint32_t lane_id = tid % 16;     // 0~15, j start
-        uint32_t j_start = lane_id * 8;
+        uint32_t lane_id = tid % 16;     // 0~15
         const uint32_t Q_DIM = QK_NOPE_HEAD_DIM + QK_ROPE_HEAD_DIM;
-        const scalar_t* q_ptr = q + (group_id + bm * 16) * (NUM_LOCAL_HEADS * Q_DIM) + hdx * Q_DIM + j_start;
-        scalar_t* shm_ptr = shm + group_id * QK_NOPE_HEAD_DIM + j_start;
+        const scalar_t* q_ptr = q + (group_id + bm * 16) * (NUM_LOCAL_HEADS * Q_DIM) + hdx * Q_DIM;
+        scalar_t* shm_ptr = shm + group_id * QK_NOPE_HEAD_DIM;
         bool pred = (group_id + bm * 16) < q_len;
-        ldg_b128_reg_noasync(*((PackTypeInt4*)shm_ptr), (PackTypeInt4*)q_ptr, pred, true);
-        // *reinterpret_cast<float4*>(shm_ptr) = *reinterpret_cast<const float4*>(q_ptr);
-        // if (q_len > 16) {
-        //     pred = group_id < q_len - 16;
-        //     ldg_b128_reg_noasync(*((PackTypeInt4*)(shm_ptr+16*QK_NOPE_HEAD_DIM)), (PackTypeInt4*)(q_ptr+16*(NUM_LOCAL_HEADS * Q_DIM)), pred, true);
-        //     // *reinterpret_cast<float4*>(shm_ptr+16*QK_NOPE_HEAD_DIM) = *reinterpret_cast<const float4*>(q_ptr+16*(NUM_LOCAL_HEADS * Q_DIM));
-        // }
+
+        // Load Q data into shared memory
+        // Each thread loads 8 elements (128-bit). With 16 threads = 128 elements per round.
+        // QK_NOPE_HEAD_DIM may be > 128, so we need multiple load rounds.
+        constexpr int ELEMENTS_PER_THREAD = 8;
+        constexpr int THREADS_PER_GROUP = 16;
+        constexpr int ELEMENTS_PER_ROUND = THREADS_PER_GROUP * ELEMENTS_PER_THREAD;  // 128
+        constexpr int LOAD_ROUNDS = (QK_NOPE_HEAD_DIM + ELEMENTS_PER_ROUND - 1) / ELEMENTS_PER_ROUND;
+
+        #pragma unroll
+        for (int round = 0; round < LOAD_ROUNDS; round++) {
+            uint32_t col_offset = round * ELEMENTS_PER_ROUND + lane_id * ELEMENTS_PER_THREAD;
+            bool valid = pred && (col_offset < QK_NOPE_HEAD_DIM);
+            if (valid) {
+                ldg_b128_reg_noasync(
+                    *((PackTypeInt4*)(shm_ptr + col_offset)),
+                    (PackTypeInt4*)(q_ptr + col_offset),
+                    valid,
+                    true
+                );
+            }
+        }
         __syncthreads();
 
         uint32_t wave_idx = tid / 64;

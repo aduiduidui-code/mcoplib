@@ -13,8 +13,6 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cub/cub.cuh>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace vllm {
 
@@ -172,8 +170,6 @@ void rms_norm_static_fp8_quant(torch::Tensor& out,     // [..., hidden_size]
                                torch::Tensor& weight,  // [hidden_size]
                                torch::Tensor& scale,   // [1]
                                double epsilon) {
-  DEBUG_TRACE_PARAMS(out, input, weight, scale, epsilon);
-  DEBUG_DUMP_PARAMS(out, input, weight, scale, epsilon);
   TORCH_CHECK(out.is_contiguous());
   int hidden_size = input.size(-1);
   int input_stride = input.stride(-2);
@@ -218,8 +214,6 @@ void fused_add_rms_norm_static_fp8_quant(
     torch::Tensor& weight,    // [hidden_size]
     torch::Tensor& scale,     // [1]
     double epsilon) {
-  DEBUG_TRACE_PARAMS(out, input, residual, weight, scale, epsilon);
-  DEBUG_DUMP_PARAMS(out, input, residual, weight, scale, epsilon);
   TORCH_CHECK(out.is_contiguous());
   TORCH_CHECK(residual.is_contiguous());
   int hidden_size = input.size(-1);

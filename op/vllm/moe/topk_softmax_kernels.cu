@@ -35,8 +35,6 @@
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace vllm {
 namespace moe {
@@ -812,6 +810,123 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
     }
 }
 
+template <typename IndType, typename InputType = float>
+__launch_bounds__(640)
+__global__ void topkGatingSigmoid288Opt(
+    const InputType* __restrict__ input,
+    const bool* __restrict__ finished,
+    float* __restrict__ output,
+    const int num_rows,
+    IndType* __restrict__ indices,
+    const int start_expert,
+    const int end_expert,
+    const bool renormalize,
+    const float* __restrict__ bias)
+{
+    constexpr int NUM_EXPERTS = 288;
+    constexpr int TOPK = 8;
+    constexpr int WARP_SIZE_C500 = 64;
+    constexpr int WARPS_PER_ROW = 5; // 288 5 个 Warp
+    constexpr int THREADS_PER_ROW = WARPS_PER_ROW * WARP_SIZE_C500; // 320
+    constexpr int ROWS_PER_CTA = 2;
+
+    const int row_in_block = threadIdx.x / THREADS_PER_ROW;
+    const int thread_row = blockIdx.x * ROWS_PER_CTA + row_in_block;
+
+    if (thread_row >= num_rows) return;
+
+    const int tid_in_row = threadIdx.x % THREADS_PER_ROW;
+    const int warp_in_row = tid_in_row / WARP_SIZE_C500;
+    const int lane_id = tid_in_row % WARP_SIZE_C500;
+
+    float row_val_for_choice = -3.4e38f;
+
+    if (tid_in_row < NUM_EXPERTS) {
+        float val = static_cast<float>(input[thread_row * NUM_EXPERTS + tid_in_row]);
+        val = 1.0f / (1.0f + __expf(-val)); // Fast Sigmoid
+        if (bias != nullptr) {
+            row_val_for_choice = val + bias[tid_in_row];
+        } else {
+            row_val_for_choice = val;
+        }
+    }
+
+    const bool row_is_active = finished ? !finished[thread_row] : true;
+    
+    float idx_and_weight[2];
+    idx_and_weight[0] = row_val_for_choice;
+    idx_and_weight[1] = 0.0f;
+    *((int64_t*)idx_and_weight) |= (static_cast<int64_t>(tid_in_row) << 32);
+
+   
+    warpSortDescendingUpdate<0xffffffffffffffff>(idx_and_weight, lane_id);
+
+    __shared__ int64_t shared_experts[ROWS_PER_CTA][WARPS_PER_ROW * TOPK];
+    __shared__ float sm_norm_vals[ROWS_PER_CTA][TOPK];
+    __shared__ float sm_sum_norm[ROWS_PER_CTA];
+
+    if (lane_id < TOPK) {
+        shared_experts[row_in_block][warp_in_row * TOPK + lane_id] = *(int64_t*)idx_and_weight;
+    }
+    __syncthreads();
+
+    
+    if (warp_in_row == 0) {
+        float final_idx_weight[2];
+        final_idx_weight[0] = -3.4e38f;
+        final_idx_weight[1] = 0.0f; 
+        *((int64_t*)final_idx_weight) |= (static_cast<int64_t>(NUM_EXPERTS + lane_id) << 32);
+
+        // 加载 5个Warp * 8 = 40个局部Top候选者
+        if (lane_id < WARPS_PER_ROW * TOPK) { 
+            *(int64_t*)final_idx_weight = shared_experts[row_in_block][lane_id];
+        }
+
+        warpSortDescendingUpdate<0xffffffffffffffff>(final_idx_weight, lane_id);
+
+        if (lane_id < TOPK) {
+            int64_t res = *(int64_t*)final_idx_weight;
+            float max_val_ordered = get_weight(res);
+            int expert_id_ordered = static_cast<int>(res >> 32);
+
+            if (bias != nullptr && expert_id_ordered < NUM_EXPERTS) {
+                max_val_ordered -= bias[expert_id_ordered];
+            }
+
+            const bool node_uses_expert = expert_id_ordered >= start_expert && expert_id_ordered < end_expert;
+            const bool should_process_row = row_is_active && node_uses_expert;
+
+            const int idx = TOPK * thread_row + lane_id;
+            indices[idx] = should_process_row ? (expert_id_ordered - start_expert) : NUM_EXPERTS;
+
+            if (renormalize) {
+                sm_norm_vals[row_in_block][lane_id] = max_val_ordered;
+            } else {
+                output[idx] = max_val_ordered;
+            }
+        }
+    }
+
+    if (renormalize) {
+        __syncthreads();
+        if (tid_in_row == 0) {
+            float sum = 0.0f;
+            #pragma unroll
+            for (int i = 0; i < TOPK; i++) {
+                sum += sm_norm_vals[row_in_block][i];
+            }
+            sm_sum_norm[row_in_block] = sum;
+        }
+        __syncthreads();
+
+        if (warp_in_row == 0 && lane_id < TOPK) {
+            const int idx = TOPK * thread_row + lane_id;
+            float const rcp_norm = __builtin_mxc_rcpf(sm_sum_norm[row_in_block]);
+            output[idx] = sm_norm_vals[row_in_block][lane_id] * rcp_norm;
+        }
+    }
+}
+
 template <int VPT, typename IndType,
           typename InputType = float>
 __global__ void topkGatingSigmoidCommonOpt(const InputType* input, const bool* finished, float* output, const int num_rows, IndType* indices,
@@ -1037,7 +1152,25 @@ void topkGatingKernelLauncher(
     (std::is_same_v<InputType, __nv_bfloat16> || std::is_same_v<InputType, __half>) ? 4 : 8;
 #endif
     if constexpr(SF == vllm::moe::SCORING_SIGMOID) {
-        if(num_experts <= 256 && topk <=16 ) {
+        if (num_experts == 288 && topk == 8) {
+            constexpr int ROWS_PER_CTA = 2;
+            constexpr int THREADS_PER_ROW = 5 * 64; // 320
+            constexpr int BLOCK_THREADS = ROWS_PER_CTA * THREADS_PER_ROW; // 640 threads per block
+            
+            const int num_blocks = (num_tokens + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+            topkGatingSigmoid288Opt<IndType, InputType><<<num_blocks, BLOCK_THREADS, 0, stream>>>(
+                (const InputType*)gating_output, 
+                nullptr, 
+                topk_weights, 
+                num_tokens, 
+                topk_indices,
+                0,             
+                num_experts,   
+                renormalize, 
+                bias
+            );
+            return;
+        } else if(num_experts <= 256 && topk <=16 ) {
             int warps_per_row = (num_experts + 64 - 1) / 64;
             int threads_per_row = warps_per_row * 64;
             int blocksize = 256;
@@ -1183,8 +1316,6 @@ void topk_softmax(
     bool renormalize,
     std::optional<torch::Tensor> bias)
 {
-  DEBUG_TRACE_PARAMS(topk_weights, topk_indices, token_expert_indices, gating_output, renormalize);
-  DEBUG_DUMP_PARAMS(topk_weights, topk_indices, token_expert_indices, gating_output, renormalize);
     const int num_experts = gating_output.size(-1);
     const auto num_tokens = gating_output.numel() / num_experts;
     const int topk = topk_weights.size(-1);

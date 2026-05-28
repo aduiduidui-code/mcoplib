@@ -6,12 +6,8 @@
 #include "core/scalar_type.hpp"
 
 #include <vector>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 torch::Tensor weak_ref_tensor(torch::Tensor& tensor) {
-  DEBUG_TRACE_PARAMS(tensor);
-  DEBUG_DUMP_PARAMS(tensor);
   // Ensure tensor is on CUDA
   if (!tensor.is_cuda()) {
     throw std::runtime_error("Tensor must be on CUDA device");
@@ -88,8 +84,8 @@ void convert_vertical_slash_indexes_mergehead(
     torch::Tensor slash_indices_count, int64_t context_size,
     int64_t block_size_M, int64_t block_size_N, bool causal);
 
-void rms_norm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight,
-              double epsilon);
+void rms_norm(torch::Tensor& out, torch::Tensor& input,
+              std::optional<torch::Tensor> weight, double epsilon);
 
 void fused_add_rms_norm(torch::Tensor& input, torch::Tensor& residual,
                         torch::Tensor& weight, double epsilon);
@@ -113,6 +109,11 @@ void fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
     torch::Tensor const& slot_mapping, torch::Tensor const& position_ids,
     torch::Tensor const& cos_sin_cache, double eps, int64_t cache_block_size);
 
+void fused_deepseek_v4_qnorm_rope_kv_rope_insert(
+    torch::Tensor& q, torch::Tensor const& kv, torch::Tensor& k_cache,
+    torch::Tensor const& slot_mapping, torch::Tensor const& position_ids,
+    torch::Tensor const& cos_sin_cache, double eps, int64_t cache_block_size);
+    
 void apply_repetition_penalties_(torch::Tensor& logits,
                                  const torch::Tensor& prompt_mask,
                                  const torch::Tensor& output_mask,
@@ -129,14 +130,10 @@ void top_k_per_row_decode(const torch::Tensor& logits, int64_t next_n,
                           int64_t numRows, int64_t stride0, int64_t stride1,
                           int64_t topK);
 
-//Todo:该算子下面large_context_topk转换，依赖PTX（persistent_topk.cuh），先保持原样
-// void persistent_topk(const torch::Tensor& logits, const torch::Tensor& lengths,
-//                      torch::Tensor& output, torch::Tensor& workspace, int64_t k,
-//                      int64_t max_seq_len);
-//该算子在topk.cu中
-void large_context_topk(const torch::Tensor& score, torch::Tensor& indices,
-                        const torch::Tensor& lengths,
-                        std::optional<torch::Tensor> row_starts_opt);
+
+void persistent_topk(const torch::Tensor& logits, const torch::Tensor& lengths,
+                     torch::Tensor& output, torch::Tensor& workspace, int64_t k,
+                     int64_t max_seq_len);
 
 void rms_norm_static_fp8_quant(torch::Tensor& out, torch::Tensor& input,
                                torch::Tensor& weight, torch::Tensor& scale,
@@ -364,13 +361,12 @@ void dsv3_fused_a_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
                        torch::Tensor const& mat_b);
 
 // Todo:PTX2CPP，minimax_reduce_rms_kernel中有两个device函数依赖PTX
-// torch::Tensor minimax_allreduce_rms(torch::Tensor const& input,
-//                                     torch::Tensor const& norm_weight,
-//                                     torch::Tensor workspace, int64_t const rank,
-//                                     int64_t const nranks, double const eps);
-// std::tuple<torch::Tensor, torch::Tensor> minimax_allreduce_rms_qk(
-//     torch::Tensor qkv, torch::Tensor const& norm_weight_q,
-//     torch::Tensor const& norm_weight_k, torch::Tensor workspace,
-//     int64_t const q_size, int64_t const kv_size, int64_t const rank,
-//     int64_t const nranks, double const eps);
-// 
+torch::Tensor minimax_allreduce_rms(torch::Tensor const& input,
+                                    torch::Tensor const& norm_weight,
+                                    torch::Tensor workspace, int64_t const rank,
+                                    int64_t const nranks, double const eps);
+std::tuple<torch::Tensor, torch::Tensor> minimax_allreduce_rms_qk(
+    torch::Tensor qkv, torch::Tensor const& norm_weight_q,
+    torch::Tensor const& norm_weight_k, torch::Tensor workspace,
+    int64_t const q_size, int64_t const kv_size, int64_t const rank,
+    int64_t const nranks, double const eps);

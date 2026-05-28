@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/irange.h>
@@ -12,9 +11,6 @@
 #include "pytorch_extension_utils_rocm.h"
 #include "utils.h"  // WARP_SIZE
 #endif
-
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 __device__ __forceinline__ void
 transfer_item_warp(int32_t lane_id, const void* src_addr, void* dst_addr, int64_t item_size_bytes) {
@@ -356,8 +352,6 @@ void transfer_kv_per_layer(
     int64_t item_size,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_k, dst_k, src_v, dst_v, src_indices, dst_indices, item_size, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_k, dst_k, src_v, dst_v, src_indices, dst_indices, item_size, block_quota, num_warps_per_block);
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_lf<const char>, get_global_offset_lf<char>, false>(
       src_k,
@@ -391,8 +385,6 @@ void transfer_kv_per_layer_pf_lf(
     int64_t src_layout_dim,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_k, dst_k, src_v, dst_v, src_indices, dst_indices, layer_id, item_size, src_layout_dim, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_k, dst_k, src_v, dst_v, src_indices, dst_indices, layer_id, item_size, src_layout_dim, block_quota, num_warps_per_block);
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_pf<const char>, get_global_offset_lf<char>, false>(
       src_k,
@@ -428,8 +420,6 @@ void transfer_kv_per_layer_ph_lf(
     int64_t head_num,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_k, dst_k, src_v, dst_v, src_indices, dst_indices, layer_id, item_size, src_layout_dim, page_size, head_num, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_k, dst_k, src_v, dst_v, src_indices, dst_indices, layer_id, item_size, src_layout_dim, page_size, head_num, block_quota, num_warps_per_block);
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_ph<const char>, get_global_offset_per_head_lf<char>, false, true>(
       src_k,
@@ -464,8 +454,6 @@ void transfer_kv_all_layer(
     int64_t num_layers,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_k_layers, dst_k_layers, src_v_layers, dst_v_layers, src_indices, dst_indices, item_size, num_layers, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_k_layers, dst_k_layers, src_v_layers, dst_v_layers, src_indices, dst_indices, item_size, num_layers, block_quota, num_warps_per_block);
   TORCH_CHECK(num_layers == src_k_layers.size(0), "Number of layers in source k tensor does not match num_layers");
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_lf_tbl<const char>, get_global_offset_lf_tbl<char>, false>(
@@ -500,8 +488,6 @@ void transfer_kv_all_layer_lf_pf(
     int64_t num_layers,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_k_layers, dst_k, src_v_layers, dst_v, src_indices, dst_indices, item_size, dst_layout_dim, num_layers, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_k_layers, dst_k, src_v_layers, dst_v, src_indices, dst_indices, item_size, dst_layout_dim, num_layers, block_quota, num_warps_per_block);
   TORCH_CHECK(num_layers == src_k_layers.size(0), "Number of layers in source k tensor does not match num_layers");
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_lf_tbl<const char>, get_global_offset_pf<char>, false>(
@@ -538,8 +524,6 @@ void transfer_kv_all_layer_lf_ph(
     int64_t head_num,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_k_layers, dst_k, src_v_layers, dst_v, src_indices, dst_indices, item_size, dst_layout_dim, num_layers, page_size, head_num, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_k_layers, dst_k, src_v_layers, dst_v, src_indices, dst_indices, item_size, dst_layout_dim, num_layers, page_size, head_num, block_quota, num_warps_per_block);
   TORCH_CHECK(num_layers == src_k_layers.size(0), "Number of layers in source k tensor does not match num_layers");
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_per_head_lf_tbl<const char>, get_global_offset_ph<char>, false, true>(
@@ -572,8 +556,6 @@ void transfer_kv_per_layer_mla(
     int64_t item_size,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src, dst, src_indices, dst_indices, item_size, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src, dst, src_indices, dst_indices, item_size, block_quota, num_warps_per_block);
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_lf<const char>, get_global_offset_lf<char>, true>(
       src,
@@ -605,8 +587,6 @@ void transfer_kv_per_layer_mla_pf_lf(
     int64_t src_layout_dim,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src, dst, src_indices, dst_indices, layer_id, item_size, src_layout_dim, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src, dst, src_indices, dst_indices, layer_id, item_size, src_layout_dim, block_quota, num_warps_per_block);
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_pf<const char>, get_global_offset_lf<char>, true>(
       src,
@@ -637,8 +617,6 @@ void transfer_kv_all_layer_mla(
     int64_t num_layers,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_layers, dst_layers, src_indices, dst_indices, item_size, num_layers, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_layers, dst_layers, src_indices, dst_indices, item_size, num_layers, block_quota, num_warps_per_block);
   TORCH_CHECK(num_layers == src_layers.size(0), "Number of layers in source tensor does not match num_layers");
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_lf_tbl<const char>, get_global_offset_lf_tbl<char>, true>(
@@ -671,8 +649,6 @@ void transfer_kv_all_layer_mla_lf_pf(
     int64_t num_layers,
     int64_t block_quota,
     int64_t num_warps_per_block) {
-  DEBUG_TRACE_PARAMS(src_layers, dst, src_indices, dst_indices, item_size, dst_layout_dim, num_layers, block_quota, num_warps_per_block);
-  DEBUG_DUMP_PARAMS(src_layers, dst, src_indices, dst_indices, item_size, dst_layout_dim, num_layers, block_quota, num_warps_per_block);
   TORCH_CHECK(num_layers == src_layers.size(0), "Number of layers in source tensor does not match num_layers");
   at::Tensor empty;
   transfer_kv_launcher<get_global_offset_lf_tbl<const char>, get_global_offset_pf<char>, true>(
@@ -713,8 +689,6 @@ void transfer_kv_direct(
     const at::Tensor src_indices,
     const at::Tensor dst_indices,
     int64_t page_size) {
-  DEBUG_TRACE_PARAMS(src_layers, dst_layers, src_indices, dst_indices, page_size);
-  DEBUG_DUMP_PARAMS(src_layers, dst_layers, src_indices, dst_indices, page_size);
   TORCH_CHECK(
       src_layers.size() == dst_layers.size(), "Source and destination layers must have the same number of layers");
   TORCH_CHECK(src_indices.numel() == dst_indices.numel(), "Source and destination indices must have the same length");
@@ -821,8 +795,6 @@ void transfer_kv_per_layer_direct_pf_lf(
     const at::Tensor& dst_indices,
     int64_t layer_id,
     int64_t page_size) {
-  DEBUG_TRACE_PARAMS(src_ptrs, dst_ptrs, src_indices, dst_indices, layer_id, page_size);
-  DEBUG_DUMP_PARAMS(src_ptrs, dst_ptrs, src_indices, dst_indices, layer_id, page_size);
   transfer_kv_page_first_direct_impl<false>(src_ptrs, dst_ptrs, src_indices, dst_indices, layer_id, page_size);
 }
 
@@ -832,7 +804,5 @@ void transfer_kv_all_layer_direct_lf_pf(
     const at::Tensor& src_indices,
     const at::Tensor& dst_indices,
     int64_t page_size) {
-  DEBUG_TRACE_PARAMS(src_ptrs, dst_ptrs, src_indices, dst_indices, page_size);
-  DEBUG_DUMP_PARAMS(src_ptrs, dst_ptrs, src_indices, dst_indices, page_size);
   transfer_kv_page_first_direct_impl<true>(src_ptrs, dst_ptrs, src_indices, dst_indices, 0, page_size);
 }

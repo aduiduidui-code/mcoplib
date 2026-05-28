@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
  * Adapted from
  * https://github.com/pytorch/pytorch/blob/v2.0.1/aten/src/ATen/Dispatch.h
@@ -40,6 +39,14 @@
     AT_DISPATCH_CASE(at::ScalarType::Float8_e4m3fn, __VA_ARGS__) \
     AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__)
 #endif
+
+#define MOE_DISPATCH_CASE_FLOATING_TYPES(...)         \
+  AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)  \
+  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
+
+#define MOE_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, MOE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
 // When using this dispatch macro, the type is 'fp8_t' not 'scalar_t'.
 // See AT_DISPATCH_FP8_CASE above.

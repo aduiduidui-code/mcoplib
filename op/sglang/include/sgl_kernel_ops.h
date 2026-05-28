@@ -1,5 +1,5 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
-/*
+/* Copyright 2025 SGLang Team. All Rights Reserved.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -168,7 +168,7 @@ void rotary_embedding(
 
 int64_t fused_mla_absorb_rotary_emb(at::Tensor& q, at::Tensor& w_kc, at::Tensor& latent_cache, at::Tensor& cos_sin_cache,
                                 at::Tensor& positions, at::Tensor& norm_weight, at::Tensor& q_input, at::Tensor& k_input, at::Tensor& v_input, 
-                                int64_t q_len, int64_t num_local_heads, int64_t kv_lora_rank, int64_t qk_rope_head_dim, int64_t qk_nope_head_dim);
+                                int64_t q_len, int64_t num_local_heads, int64_t kv_lora_rank, int64_t qk_rope_head_dim, int64_t qk_nope_head_dim, double eps = 1e-06f);
 
 // void downcast_fp8(
 //     at::Tensor& k,
@@ -914,6 +914,10 @@ void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
 void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
                                torch::Tensor& scales,
                                std::optional<torch::Tensor> const& azp);
+
+void fused_silu_mul_dq_mask_quant_pack(torch::Tensor& out, torch::Tensor const& input, torch::Tensor const& mask,
+                               c10::optional<double> _swiglu_limit,
+                               c10::optional<at::Tensor> weight);
 /*
  * From csrc/mamba
  */

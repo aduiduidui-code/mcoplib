@@ -1,6 +1,7 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 // This is only a plugin used for flashinfer 0.1.6. The new version does not need it.
 /*
+ * Copyright (c) 2025 by SGLang team.
+ * Copyright (c) 2025 by FlashInfer team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +19,6 @@
 #include <flashinfer/quantization.cuh>
 
 #include "pytorch_extension_utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 using namespace flashinfer;
 
@@ -31,8 +30,6 @@ void segment_packbits(
     at::Tensor y,
     int64_t batch_size,
     int64_t cuda_stream) {
-  DEBUG_TRACE_PARAMS(x, input_indptr, output_indptr, y, batch_size, cuda_stream);
-  DEBUG_DUMP_PARAMS(x, input_indptr, output_indptr, y, batch_size, cuda_stream);
   CHECK_INPUT(x);
   CHECK_INPUT(input_indptr);
   CHECK_INPUT(output_indptr);

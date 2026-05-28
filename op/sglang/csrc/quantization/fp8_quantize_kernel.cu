@@ -6,8 +6,6 @@
 #include <cuda_fp16.h>
 #include <maca_fp8.h>
 #include "../dispatch_utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 #ifndef USE_ROCM
   #include <cub/util_type.cuh>
@@ -165,8 +163,6 @@ void per_token_cast_to_fp8(
     torch::Tensor& scale,   
     torch::Tensor const& input)
 {
-    DEBUG_TRACE_PARAMS(out, scale, input);
-    DEBUG_DUMP_PARAMS(out, scale, input);
     TORCH_CHECK(input.is_contiguous());
     TORCH_CHECK(scale.is_contiguous());
     TORCH_CHECK(out.is_contiguous());

@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 // Adapted from
 // https://github.com/flashinfer-ai/flashinfer/blob/55576c626421b5ee7e7ebe74afd26465c8ae863f/csrc/cascade.cu
 
@@ -8,15 +7,11 @@
 #include <flashinfer/attention/cascade.cuh>
 
 #include "pytorch_extension_utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 using namespace flashinfer;
 
 void merge_state(
     at::Tensor v_a, at::Tensor s_a, at::Tensor v_b, at::Tensor s_b, at::Tensor v_merged, at::Tensor s_merged) {
-  DEBUG_TRACE_PARAMS(v_a, s_a, v_b, s_b, v_merged, s_merged);
-  DEBUG_DUMP_PARAMS(v_a, s_a, v_b, s_b, v_merged, s_merged);
   CHECK_INPUT(v_a);
   CHECK_INPUT(s_a);
   CHECK_INPUT(v_b);

@@ -1,8 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-// #include <torch/extension.h>
-#include <torch/csrc/api/include/torch/types.h>
+#include <torch/extension.h>
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -12,130 +11,6 @@
 #include <cstring>
 #include <cstdlib>  // for std::getenv
 #include <optional> // 必须包含这个头文件
-#include <algorithm>
-#include <cctype>
-
-inline std::string trim(std::string s) {
-    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
-    s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
-    return s;
-}
-
-inline std::string to_lower(std::string s) { 
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-inline std::string normalize_path(std::string s) {
-    std::replace(s.begin(), s.end(), '\\', '/');
-    return s;
-}
-
-inline std::string make_function_id(const char* file, const char* func) {
-    static constexpr const char* kSep = "@@MCOP_FILE_FUNC@@";
-    std::string s;
-    if (file) s += file;
-    s += kSep;
-    if (func) s += func;
-    return s;
-}
-
-inline std::pair<std::string, std::string> split_function_id(const std::string& function_id) {
-    static constexpr const char* kSep = "@@MCOP_FILE_FUNC@@";
-    const std::string sep(kSep);
-    const size_t pos = function_id.find(sep);
-    if (pos == std::string::npos) {
-        return {"", function_id};
-    }
-    return {
-        function_id.substr(0, pos),
-        function_id.substr(pos + sep.size())
-    };
-}
-
-struct KernelFilter {
-    bool enabled = false;
-    std::string backend;
-    std::string keyword;
-};
-
-inline KernelFilter parse_kernel_filter() {
-    KernelFilter f;
-    const char* env = std::getenv("MCOPLIB_OP_KERNEL_NAME");
-    if (!env) return f;
-
-    std::string raw = trim(env);
-    if (raw.empty()) return f;
-
-    raw = to_lower(raw);
-    const size_t pos = raw.find(':');
-    if (pos == std::string::npos) {
-        f.keyword = trim(raw);
-    } else {
-        f.backend = trim(raw.substr(0, pos));
-        f.keyword = trim(raw.substr(pos + 1));
-    }
-
-    if (!f.keyword.empty()) {
-        f.enabled = true;
-    }
-    return f;
-}
-
-inline const KernelFilter& get_kernel_filter() {
-    static const KernelFilter f = parse_kernel_filter();
-    return f;
-}
-
-inline std::string detect_backend_from_file(const std::string& file_path) {
-    const std::string path = to_lower(normalize_path(file_path));
-    if (path.find("/vllm/") != std::string::npos) return "vllm";
-    if (path.find("/sglang/") != std::string::npos) return "sglang";
-    return "";
-}
-
-inline bool should_dump_function(const std::string& function_id) {
-    const auto& filter = get_kernel_filter();
-
-    if (!filter.enabled) {
-        return false;
-    }
-
-    const auto [file_path, func_name] = split_function_id(function_id);
-    const std::string fn = to_lower(func_name);
-
-    if (fn.find(filter.keyword) == std::string::npos) {
-        return false;
-    }
-
-    if (filter.backend.empty()) {
-        return true;
-    }
-
-    return detect_backend_from_file(file_path) == filter.backend;
-}
-
-inline std::string get_display_function_name(const std::string& function_id) {
-    return split_function_id(function_id).second;
-}
-
-inline std::string sanitize_filename(std::string s) {
-    for (char& c : s) {
-        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')) {
-            c = '_';
-        }
-    }
-    return s;
-}
-
-inline std::string make_dump_filename(const std::string& function_id) {
-    const auto [file_path, func_name] = split_function_id(function_id);
-    std::string backend = detect_backend_from_file(file_path);
-    if (backend.empty()) backend = "common";
-    return backend + "__" + sanitize_filename(func_name) + ".json";
-}
 namespace mcop {
 namespace debug {
 
@@ -772,55 +647,60 @@ auto collect_params_with_names(const std::vector<const char*>& names, const Args
 
 // 主要的dump函数
 template<typename... Args>
-inline void dump_params(const std::string& function_id,
-                        const std::vector<const char*>& param_names,
+inline void dump_params(const char* function_name,
+                       
+    
+    const std::vector<const char*>& param_names,
                         const Args&... args) {
     if (!is_debug_enabled()) {
-        return;
-    }
-
-    if (!should_dump_function(function_id)) {
-        return;
+        return;  // 零开销：编译器会优化掉
     }
 
     try {
+        // 收集参数信息
         auto params = collect_params_with_names(param_names, args...);
 
-        const std::string function_name = get_display_function_name(function_id);
-        std::string json = JsonGenerator::generate(params, function_name.c_str());
+        // 生成JSON
+        std::string json = JsonGenerator::generate(params, function_name);
 
-        std::string filename = make_dump_filename(function_id);
+        // 生成文件名
+        std::string filename = std::string(function_name) + ".json";
+
+        // 写入文件
         write_to_file(json, filename);
     } catch (const std::exception& e) {
+        // 静默失败，不影响kernel执行
         (void)e;
     }
 }
 
 // 简化版本：不带参数名
 template<typename... Args>
-inline void dump_params_simple(const std::string& function_id, const Args&... args) {
+inline void dump_params_simple(const char* function_name, const Args&... args) {
     if (!is_debug_enabled()) {
-        return;
+        return;  // 零开销：编译器会优化掉
     }
-
-    if (!should_dump_function(function_id)) {
-        return;
-    }
-
+ 
     try {
+        // 收集参数信息（不带参数名）
         auto params = collect_params(args...);
+        // 自动生成参数名 arg0, arg1, ...
         for (size_t i = 0; i < params.size(); ++i) {
             if (params[i].name.empty()) {
                 params[i].name = "arg" + std::to_string(i);
             }
         }
+      
+        // 生成JSON
+        std::string json = JsonGenerator::generate(params, function_name);
+        // 生成文件名
+        std::string filename = std::string(function_name) + ".json";
+     
 
-        const std::string function_name = get_display_function_name(function_id);
-        std::string json = JsonGenerator::generate(params, function_name.c_str());
-
-        std::string filename = make_dump_filename(function_id);
+        // 写入文件
         write_to_file(json, filename);
     } catch (const std::exception& e) {
+        // 静默失败，不影响kernel执行
         (void)e;
     }
 }
@@ -834,7 +714,7 @@ inline void dump_params_simple(const std::string& function_id, const Args&... ar
 // ============================================================================
 
 // 获取函数名的宏
-#define MCOP_GET_FUNC_NAME() (::make_function_id(__FILE__, __FUNCTION__))
+#define MCOP_GET_FUNC_NAME() __FUNCTION__
 
 // 参数计数宏（计算可变参数的个数）
 #define PP_NARG(...) \
@@ -846,11 +726,10 @@ inline void dump_params_simple(const std::string& function_id, const Args&... ar
 #define PP_ARG_N( \
           _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, \
          _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, \
-         _21, _22, _23, _24, _25, _26, _27, _28, \
          N, ...) N
 
 #define PP_RSEQ_N() \
-         28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, \
+         20, 19, 18, 17, 16, 15, 14, 13, 12, 11, \
          10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 
 // 宏重载选择器
@@ -1036,78 +915,6 @@ inline void dump_params_simple(const std::string& function_id, const Args&... ar
             constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20}; \
             std::vector<const char*> _names_vec(_names, _names + 20); \
             ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_21(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21}; \
-            std::vector<const char*> _names_vec(_names, _names + 21); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_22(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22}; \
-            std::vector<const char*> _names_vec(_names, _names + 22); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_23(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22, #x23}; \
-            std::vector<const char*> _names_vec(_names, _names + 23); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_24(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22, #x23, #x24}; \
-            std::vector<const char*> _names_vec(_names, _names + 24); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_25(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22, #x23, #x24, #x25}; \
-            std::vector<const char*> _names_vec(_names, _names + 25); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_26(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22, #x23, #x24, #x25, #x26}; \
-            std::vector<const char*> _names_vec(_names, _names + 26); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_27(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22, #x23, #x24, #x25, #x26, #x27}; \
-            std::vector<const char*> _names_vec(_names, _names + 27); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27); \
-        } \
-    } while(0)
-
-#define DEBUG_DUMP_PARAMS_IMPL_28(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28) \
-    do { \
-        if (::mcop::debug::is_debug_enabled()) { \
-            constexpr const char* _names[] = {#x1, #x2, #x3, #x4, #x5, #x6, #x7, #x8, #x9, #x10, #x11, #x12, #x13, #x14, #x15, #x16, #x17, #x18, #x19, #x20, #x21, #x22, #x23, #x24, #x25, #x26, #x27, #x28}; \
-            std::vector<const char*> _names_vec(_names, _names + 28); \
-            ::mcop::debug::dump_params(MCOP_GET_FUNC_NAME(), _names_vec, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28); \
         } \
     } while(0)
 
