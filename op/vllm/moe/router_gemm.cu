@@ -8,8 +8,6 @@
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <cublas_v2.h>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 // cuBLAS column-major math for row-major PyTorch tensors:
 //   weight[N,K]_row  lda=K  -> cuBLAS sees (K,N) col-major; CUBLAS_OP_T ->
@@ -21,36 +19,34 @@
 
 torch::Tensor router_gemm_bf16_fp32(torch::Tensor const& input,
                                     torch::Tensor const& weight) {
-    DEBUG_TRACE_PARAMS(input, weight);
-    DEBUG_DUMP_PARAMS(input, weight);
-    TORCH_CHECK(input.dtype() == torch::kBFloat16,
-                "router_gemm_bf16_fp32: input must be bfloat16");
-    TORCH_CHECK(weight.dtype() == torch::kBFloat16,
-                "router_gemm_bf16_fp32: weight must be bfloat16");
-    TORCH_CHECK(input.dim() == 2 && weight.dim() == 2,
-                "router_gemm_bf16_fp32: input and weight must be 2-D");
-    TORCH_CHECK(input.size(1) == weight.size(1),
-                "router_gemm_bf16_fp32: inner dimensions must match");
+  TORCH_CHECK(input.dtype() == torch::kBFloat16,
+              "router_gemm_bf16_fp32: input must be bfloat16");
+  TORCH_CHECK(weight.dtype() == torch::kBFloat16,
+              "router_gemm_bf16_fp32: weight must be bfloat16");
+  TORCH_CHECK(input.dim() == 2 && weight.dim() == 2,
+              "router_gemm_bf16_fp32: input and weight must be 2-D");
+  TORCH_CHECK(input.size(1) == weight.size(1),
+              "router_gemm_bf16_fp32: inner dimensions must match");
 
-    int64_t const M = input.size(0);
-    int64_t const N = weight.size(0);
-    int64_t const K = input.size(1);
+  int64_t const M = input.size(0);
+  int64_t const N = weight.size(0);
+  int64_t const K = input.size(1);
 
-    auto out = torch::empty({M, N}, input.options().dtype(torch::kFloat32));
+  auto out = torch::empty({M, N}, input.options().dtype(torch::kFloat32));
 
-    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-    TORCH_CUDABLAS_CHECK(
-        cublasSetStream(handle, at::cuda::getCurrentCUDAStream()));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(
+      cublasSetStream(handle, at::cuda::getCurrentCUDAStream()));
 
-    float const alpha = 1.0f;
-    float const beta = 0.0f;
+  float const alpha = 1.0f;
+  float const beta = 0.0f;
 
-    TORCH_CUDABLAS_CHECK(cublasGemmEx(
-        handle, CUBLAS_OP_T, CUBLAS_OP_N, static_cast<int>(N),
-        static_cast<int>(M), static_cast<int>(K), &alpha, weight.data_ptr(),
-        CUDA_R_16BF, static_cast<int>(K), input.data_ptr(), CUDA_R_16BF,
-        static_cast<int>(K), &beta, out.data_ptr(), CUDA_R_32F,
-        static_cast<int>(N), CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+  TORCH_CUDABLAS_CHECK(cublasGemmEx(
+      handle, CUBLAS_OP_T, CUBLAS_OP_N, static_cast<int>(N),
+      static_cast<int>(M), static_cast<int>(K), &alpha, weight.data_ptr(),
+      CUDA_R_16BF, static_cast<int>(K), input.data_ptr(), CUDA_R_16BF,
+      static_cast<int>(K), &beta, out.data_ptr(), CUDA_R_32F,
+      static_cast<int>(N), CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
 
-    return out;
+  return out;
 }

@@ -1,5 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
+ * Copyright (c) 2024 by FlashInfer team.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -20,8 +21,6 @@
 
 #include "pos_enc.cuh"
 #include "utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 using namespace flashinfer;
 
@@ -38,8 +37,6 @@ void apply_rope_pos_ids_cos_sin_cache(
     const std::optional<at::Tensor>& k_buffer,
     const std::optional<at::Tensor>& v_buffer,
     const std::optional<at::Tensor>& kv_cache_loc) {
-  DEBUG_TRACE_PARAMS(q, k, q_rope, k_rope, cos_sin_cache, pos_ids, interleave, enable_pdl, v, k_buffer, v_buffer, kv_cache_loc);
-  DEBUG_DUMP_PARAMS(q, k, q_rope, k_rope, cos_sin_cache, pos_ids, interleave, enable_pdl, v, k_buffer, v_buffer, kv_cache_loc);
   CHECK_LAST_DIM_CONTIGUOUS(q);
   CHECK_LAST_DIM_CONTIGUOUS(k);
 

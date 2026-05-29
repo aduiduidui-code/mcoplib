@@ -1,9 +1,8 @@
+// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/all.h>
 #include "fused_moe_gate.cuh"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 
 int64_t fused_moe_gate_opt(
@@ -18,8 +17,6 @@ int64_t fused_moe_gate_opt(
     std::optional<int64_t> num_fused_shared_experts,
     std::optional<double>  routed_scaling_factor
 ) {
-  DEBUG_TRACE_PARAMS(gating_outputs, correction_bias, out_routing_weights, out_selected_experts, topk, renormalize, num_expert_group, topk_group, num_fused_shared_experts, routed_scaling_factor);
-  DEBUG_DUMP_PARAMS(gating_outputs, correction_bias, out_routing_weights, out_selected_experts, topk, renormalize, num_expert_group, topk_group, num_fused_shared_experts, routed_scaling_factor);
     const at::cuda::OptionalCUDAGuard device_guard(device_of(gating_outputs));
     TORCH_CHECK(((topk == 8) || (topk == 9)), "Expected topk = 8, but get topk = ", topk);
     int dev = gating_outputs.get_device();
@@ -82,7 +79,9 @@ int64_t fused_moe_gate_opt(
     LAUNCH_MOE_GATE(0, 288, 1, 1, 8)
     // TopK=9, 1个共享专家配置 (按专家数排序)
     LAUNCH_MOE_GATE(1, 160, 1, 1, 9)
+
     LAUNCH_MOE_GATE(1, 256, 1, 1, 9)
+
     LAUNCH_MOE_GATE(1, 256, 8, 4, 9)
     LAUNCH_MOE_GATE(1, 320, 1, 1, 9)
     LAUNCH_MOE_GATE(1, 384, 1, 1, 9)

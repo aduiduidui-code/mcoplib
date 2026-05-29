@@ -7,12 +7,10 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cub/cub.cuh>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace vllm {
 // TODO(woosuk): Further optimize this kernel.
-template <typename scalar_t, int VEC_SIZE, int NUM_DIMS>
+template <typename scalar_t, int VEC_SIZE, int NUM_DIMS, bool HAS_WEIGHT>
 __global__ void rms_norm_kernel(
     scalar_t* __restrict__ out,           // [..., hidden_size]
     const scalar_t* __restrict__ input,   // [..., hidden_size]
@@ -21,7 +19,7 @@ __global__ void rms_norm_kernel(
     const int64_t input_stride_d4,        // input.stride(-4)
     const int64_t input_shape_d2,         // input.size(-2)
     const int64_t input_shape_d3,         // input.size(-3)
-    const scalar_t* __restrict__ weight,  // [hidden_size]
+    const scalar_t* __restrict__ weight,  // [hidden_size] (can be nullptr if HAS_WEIGHT=false)
     const float epsilon, const int num_tokens, const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
@@ -70,19 +68,35 @@ __global__ void rms_norm_kernel(
 
   scalar_t* out_row = out + blockIdx.x * hidden_size;
   auto* v_in = reinterpret_cast<const vec_n_t<scalar_t, VEC_SIZE>*>(input_row);
-  auto* v_w = reinterpret_cast<const vec_n_t<scalar_t, VEC_SIZE>*>(weight);
   auto* v_out = reinterpret_cast<vec_n_t<scalar_t, VEC_SIZE>*>(out_row);
-  for (int i = threadIdx.x; i < hidden_size / VEC_SIZE; i += blockDim.x) {
-    vec_n_t<scalar_t, VEC_SIZE> dst;
-    vec_n_t<scalar_t, VEC_SIZE> src1 = v_in[i];
-    vec_n_t<scalar_t, VEC_SIZE> src2 = v_w[i];
+
+  if constexpr (HAS_WEIGHT) {
+    // Apply weight when provided: out = x * s_variance * weight
+    auto* v_w = reinterpret_cast<const vec_n_t<scalar_t, VEC_SIZE>*>(weight);
+    for (int i = threadIdx.x; i < hidden_size / VEC_SIZE; i += blockDim.x) {
+      vec_n_t<scalar_t, VEC_SIZE> dst;
+      vec_n_t<scalar_t, VEC_SIZE> src1 = v_in[i];
+      vec_n_t<scalar_t, VEC_SIZE> src2 = v_w[i];
 #pragma unroll
-    for (int j = 0; j < VEC_SIZE; j++) {
-      float x = static_cast<float>(src1.val[j]);
-      float w = static_cast<float>(src2.val[j]);
-      dst.val[j] = static_cast<scalar_t>(x * s_variance * w);
+      for (int j = 0; j < VEC_SIZE; j++) {
+        float x = static_cast<float>(src1.val[j]);
+        float w = static_cast<float>(src2.val[j]);
+        dst.val[j] = static_cast<scalar_t>(x * s_variance * w);
+      }
+      v_out[i] = dst;
     }
-    v_out[i] = dst;
+  } else {
+    // No weight: out = x * s_variance
+    for (int i = threadIdx.x; i < hidden_size / VEC_SIZE; i += blockDim.x) {
+      vec_n_t<scalar_t, VEC_SIZE> dst;
+      vec_n_t<scalar_t, VEC_SIZE> src1 = v_in[i];
+#pragma unroll
+      for (int j = 0; j < VEC_SIZE; j++) {
+        float x = static_cast<float>(src1.val[j]);
+        dst.val[j] = static_cast<scalar_t>(x * s_variance);
+      }
+      v_out[i] = dst;
+    }
   }
 }
 
@@ -193,16 +207,19 @@ fused_add_rms_norm_kernel(
 
 void rms_norm(torch::Tensor& out,     // [..., hidden_size]
               torch::Tensor& input,   // [..., hidden_size]
-              torch::Tensor& weight,  // [hidden_size]
+              std::optional<torch::Tensor> weight,  // [hidden_size] or None
               double epsilon) {
-  DEBUG_TRACE_PARAMS(out, input, weight, epsilon);
-  DEBUG_DUMP_PARAMS(out, input, weight, epsilon);
   TORCH_CHECK(out.is_contiguous());
   if (input.stride(-1) != 1) {
     input = input.contiguous();
   }
   TORCH_CHECK(input.stride(-1) == 1);
-  TORCH_CHECK(weight.is_contiguous());
+
+  bool has_weight = weight.has_value();
+  if (has_weight) {
+    TORCH_CHECK(weight->is_contiguous());
+    TORCH_CHECK(weight->size(0) == input.size(-1));
+  }
 
   int hidden_size = input.size(-1);
 
@@ -219,20 +236,31 @@ void rms_norm(torch::Tensor& out,     // [..., hidden_size]
   dim3 grid(num_tokens);
   const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
   VLLM_DISPATCH_RANK234(num_dims, [&] {
     VLLM_DISPATCH_FLOATING_TYPES(input.scalar_type(), "rms_norm_kernel", [&] {
+      const scalar_t* weight_ptr = has_weight ? weight->data_ptr<scalar_t>() : nullptr;
       const int calculated_vec_size =
           std::gcd(16 / sizeof(scalar_t), hidden_size);
       const int block_size =
           std::min(hidden_size / calculated_vec_size, max_block_size);
       dim3 block(block_size);
       VLLM_DISPATCH_VEC_SIZE(calculated_vec_size, [&] {
-        vllm::rms_norm_kernel<scalar_t, vec_size, tensor_rank>
-            <<<grid, block, 0, stream>>>(
-                out.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(),
-                input_stride_d2, input_stride_d3, input_stride_d4,
-                input_shape_d2, input_shape_d3, weight.data_ptr<scalar_t>(),
-                epsilon, num_tokens, hidden_size);
+        if (has_weight) {
+          vllm::rms_norm_kernel<scalar_t, vec_size, tensor_rank, true>
+              <<<grid, block, 0, stream>>>(
+                  out.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(),
+                  input_stride_d2, input_stride_d3, input_stride_d4,
+                  input_shape_d2, input_shape_d3, weight_ptr,
+                  epsilon, num_tokens, hidden_size);
+        } else {
+          vllm::rms_norm_kernel<scalar_t, vec_size, tensor_rank, false>
+              <<<grid, block, 0, stream>>>(
+                  out.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(),
+                  input_stride_d2, input_stride_d3, input_stride_d4,
+                  input_shape_d2, input_shape_d3, weight_ptr,
+                  epsilon, num_tokens, hidden_size);
+        }
       });
     });
   });
@@ -494,8 +522,6 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
                         torch::Tensor& residual,  // [..., hidden_size]
                         torch::Tensor& weight,    // [hidden_size]
                         double epsilon) {
-  DEBUG_TRACE_PARAMS(input, residual, weight, epsilon);
-  DEBUG_DUMP_PARAMS(input, residual, weight, epsilon);
   TORCH_CHECK(weight.scalar_type() == input.scalar_type());
   TORCH_CHECK(input.scalar_type() == residual.scalar_type());
   TORCH_CHECK(residual.is_contiguous());

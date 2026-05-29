@@ -1,5 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
+ * Copyright (c) 2025 by SGLang team.
+ * Copyright (c) 2025 by FlashInfer team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +16,6 @@
  */
 #include "pytorch_extension_utils.h"
 #include "speculative_sampling.cuh"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 using namespace flashinfer;
 
@@ -44,8 +43,6 @@ void tree_speculative_sampling_target_only(
     double threshold_single,
     double threshold_acc,
     bool deterministic = true) {
-  DEBUG_TRACE_PARAMS(predicts, accept_index, accept_token_num, candidates, retrive_index, retrive_next_token, retrive_next_sibling, uniform_samples, uniform_samples_for_final_sampling, target_probs, draft_probs, threshold_single, threshold_acc, deterministic);
-  DEBUG_DUMP_PARAMS(predicts, accept_index, accept_token_num, candidates, retrive_index, retrive_next_token, retrive_next_sibling, uniform_samples, uniform_samples_for_final_sampling, target_probs, draft_probs, threshold_single, threshold_acc, deterministic);
   CHECK_INPUT(candidates);
   CHECK_INPUT(retrive_index);
   CHECK_INPUT(retrive_next_token);

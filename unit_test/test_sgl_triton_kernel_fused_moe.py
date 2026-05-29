@@ -211,6 +211,8 @@ def test_invoke_fused_moe_kernel_only():
                     use_int4_w4a16=False,
                     per_channel_quant=False,
                     block_shape=None,
+                    fuse_add_to_output=False,
+                    add_output_mask=None,
             )
         if DEVICE.type == "cuda":
             torch.cuda.synchronize()
@@ -240,6 +242,8 @@ def test_invoke_fused_moe_kernel_only():
                     use_int4_w4a16=False,
                     per_channel_quant=False,
                     block_shape=None,
+                    fuse_add_to_output=False,
+                    add_output_mask=None,
         )
 
         
@@ -296,6 +300,8 @@ def test_invoke_fused_moe_kernel_only():
                     use_int4_w4a16=False,
                     per_channel_quant=False,
                     block_shape=None,
+                    fuse_add_to_output=False,
+                    add_output_mask=None,
                 )
             evt_e.record()
             torch.cuda.synchronize()

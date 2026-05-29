@@ -18,8 +18,6 @@ limitations under the License.
 #include <flashinfer/norm.cuh>
 
 #include "utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 using namespace flashinfer;
 
@@ -115,6 +113,7 @@ __global__ void FusedAddRMSNormKernelOpt(T* __restrict__ input, T* __restrict__ 
     copy<sizeof(T)*VEC_SIZE>((void*)reg_residual, (void*)(ptr_residual + i));
     k++;
   }
+
     constexpr int sm_size = NUM_THREADS >> 4;
     constexpr int sm_size2 = sm_size / 2;
     __shared__ float sm_sum[sm_size];
@@ -215,7 +214,7 @@ __global__ void FusedAddRMSNormKernelOpt(T* __restrict__ input, T* __restrict__ 
   k = 0;
   for(uint32_t i = tid; i < d; i += block_stride) {
     T local_weight[VEC_SIZE];
-    copy<sizeof(T)*VEC_SIZE>((void*)local_weight, (void*)(ptr_weight + i));
+    copy<sizeof(T)*VEC_SIZE>((void*)(ptr_weight + i),(void*)local_weight);
     T reg_dst[VEC_SIZE];
     #pragma unroll VEC_SIZE
     for(uint32_t j = 0; j < VEC_SIZE; j++) {
@@ -264,8 +263,6 @@ int launch_fused_add_rmsnorm(T* input, T* residual, T* weight, uint32_t batch_si
 
 void sgl_fused_add_rmsnorm(
     torch::Tensor input, torch::Tensor residual, torch::Tensor weight, double eps, bool enable_pdl) {
-  DEBUG_TRACE_PARAMS(input, residual, weight, eps, enable_pdl);
-  DEBUG_DUMP_PARAMS(input, residual, weight, eps, enable_pdl);
   CHECK_INPUT(input);
   CHECK_INPUT(residual);
   CHECK_INPUT(weight);

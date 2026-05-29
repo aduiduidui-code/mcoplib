@@ -1,5 +1,5 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
-/*
+/* Copyright 2025 SGLang Team. All Rights Reserved.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,12 +19,8 @@ limitations under the License.
 #include <ATen/Tensor.h>
 
 #include <vector>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 at::Tensor weak_ref_tensor(const at::Tensor& tensor) {
-  DEBUG_TRACE_PARAMS(tensor);
-  DEBUG_DUMP_PARAMS(tensor);
   TORCH_CHECK(tensor.is_cuda(), "weak_ref_tensor expects a CUDA tensor");
 
   void* data_ptr = tensor.data_ptr();

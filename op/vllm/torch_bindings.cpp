@@ -179,7 +179,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // Layernorm
   // Apply Root Mean Square (RMS) Normalization to the input tensor.
   ops.def(
-      "rms_norm(Tensor! result, Tensor input, Tensor weight, float epsilon) -> "
+      "rms_norm(Tensor! result, Tensor input, Tensor? weight, float epsilon) -> "
       "()");
   ops.impl("rms_norm", torch::kCUDA, &rms_norm);
 
@@ -217,6 +217,14 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert", torch::kCUDA,
            &fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert);
 
+  ops.def(
+      "fused_deepseek_v4_qnorm_rope_kv_rope_insert("
+      "Tensor! q, Tensor kv, Tensor! k_cache, "
+      "Tensor slot_mapping, Tensor position_ids, Tensor cos_sin_cache, "
+      "float eps, int cache_block_size) -> ()");
+  ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_insert", torch::kCUDA,
+           &fused_deepseek_v4_qnorm_rope_kv_rope_insert);
+           
   // Apply repetition penalties to logits in-place
   ops.def(
       "apply_repetition_penalties_(Tensor! logits, Tensor prompt_mask, "
@@ -236,16 +244,12 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "Tensor seq_lens, Tensor! indices, "
       "int numRows, int stride0, int stride1, int topK) -> ()");
   ops.impl("top_k_per_row_decode", torch::kCUDA, &top_k_per_row_decode);
-
-//   ops.def(
-//       "persistent_topk(Tensor logits, Tensor lengths, Tensor! output, "
-//       "Tensor workspace, int k, int max_seq_len) -> ()");
-//   ops.impl("persistent_topk", torch::kCUDA, &persistent_topk);
+   
   ops.def(
-      "large_context_topk(Tensor score, Tensor indices, Tensor lengths, "
-      "Tensor? "
-      "row_starts_opt) -> ()");
-  ops.impl("large_context_topk", torch::kCUDA, &large_context_topk);
+      "persistent_topk(Tensor logits, Tensor lengths, Tensor! output, "
+      "Tensor workspace, int k, int max_seq_len) -> ()");
+  ops.impl("persistent_topk", torch::kCUDA, &persistent_topk);
+
 
   // ┌------------------------  Not supported for Metax
   // ------------------------┐ Layernorm-quant Apply Root Mean Square (RMS)
@@ -454,27 +458,27 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "int pad_slot_id) -> ()");
   ops.impl("selective_scan_fwd", torch::kCUDA, &selective_scan_fwd);
 
-//   ops.def(
-//       "minimax_allreduce_rms("
-//       "Tensor input,"
-//       "Tensor norm_weight,"
-//       "Tensor workspace,"
-//       "int rank,"
-//       "int nranks,"
-//       "float eps) -> Tensor");
-//   ops.impl("minimax_allreduce_rms", torch::kCUDA, &minimax_allreduce_rms);
-//   ops.def(
-//       "minimax_allreduce_rms_qk("
-//       "Tensor qkv,"
-//       "Tensor norm_weight_q,"
-//       "Tensor norm_weight_k,"
-//       "Tensor workspace,"
-//       "int q_size,"
-//       "int kv_size,"
-//       "int rank,"
-//       "int nranks,"
-//       "float eps) -> (Tensor, Tensor)");
-//   ops.impl("minimax_allreduce_rms_qk", torch::kCUDA, &minimax_allreduce_rms_qk);
+  ops.def(
+      "minimax_allreduce_rms("
+      "Tensor input,"
+      "Tensor norm_weight,"
+      "Tensor workspace,"
+      "int rank,"
+      "int nranks,"
+      "float eps) -> Tensor");
+  ops.impl("minimax_allreduce_rms", torch::kCUDA, &minimax_allreduce_rms);
+  ops.def(
+      "minimax_allreduce_rms_qk("
+      "Tensor qkv,"
+      "Tensor norm_weight_q,"
+      "Tensor norm_weight_k,"
+      "Tensor workspace,"
+      "int q_size,"
+      "int kv_size,"
+      "int rank,"
+      "int nranks,"
+      "float eps) -> (Tensor, Tensor)");
+  ops.impl("minimax_allreduce_rms_qk", torch::kCUDA, &minimax_allreduce_rms_qk);
 
 }
 

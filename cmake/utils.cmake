@@ -63,7 +63,7 @@ function (get_torch_gpu_compiler_flags OUT_GPU_FLAGS GPU_LANG USE_MACA)
     if (USE_MACA)
       message(WARNING "Use MACA, Overwrite GPU_FLAGS.")
       set(GPU_FLAGS 
-        "-D__CUDA_NO_HALF_OPERATORS__"
+        #"-D__CUDA_NO_HALF_OPERATORS__"
         "-D__CUDA_NO_HALF_CONVERSIONS__"
         "-D__CUDA_NO_HALF2_OPERATORS__"
         "--expt-relaxed-constexpr")
@@ -77,7 +77,7 @@ function (get_torch_gpu_compiler_flags OUT_GPU_FLAGS GPU_LANG USE_MACA)
     endif()
     if (CUDA_VERSION VERSION_GREATER_EQUAL 12.0)
       list(REMOVE_ITEM GPU_FLAGS
-        "-D__CUDA_NO_HALF_OPERATORS__"
+        #"-D__CUDA_NO_HALF_OPERATORS__"
         "-D__CUDA_NO_HALF_CONVERSIONS__"
 
         "-D__CUDA_NO_HALF2_OPERATORS__")
@@ -415,8 +415,7 @@ function (define_gpu_extension_target GPU_MOD_NAME)
   target_compile_definitions(${GPU_MOD_NAME} PRIVATE
     "-DTORCH_EXTENSION_NAME=${GPU_MOD_NAME}")
   
-  target_include_directories(${GPU_MOD_NAME} PRIVATE 
-    ${CMAKE_SOURCE_DIR}/op
+  target_include_directories(${GPU_MOD_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/op
     ${GPU_INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/common)
 
