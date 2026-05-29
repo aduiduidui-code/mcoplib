@@ -1,11 +1,8 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <cuda_runtime.h>
 
 #include "pytorch_extension_utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 constexpr int NUM_LOCAL_HEADS = 128;
 constexpr int QK_NOPE_HEAD_DIM = 128;
@@ -88,8 +85,6 @@ inline void check_tensor(const at::Tensor& t, int64_t shape0, int64_t shape1, in
 }
 
 void concat_mla_k(at::Tensor k, at::Tensor k_nope, at::Tensor k_rope) {
-  DEBUG_TRACE_PARAMS(k, k_nope, k_rope);
-  DEBUG_DUMP_PARAMS(k, k_nope, k_rope);
   const int num_tokens = k.size(0);
 
   check_tensor(k, num_tokens, NUM_LOCAL_HEADS, K_HEAD_DIM, at::kBFloat16);
@@ -191,8 +186,6 @@ inline void check_tensor_concat_mla_absorb_q(const at::Tensor& t, int64_t shape2
 
 // TODO further optimize it later
 void concat_mla_absorb_q(at::Tensor a, at::Tensor b, at::Tensor out) {
-  DEBUG_TRACE_PARAMS(a, b, out);
-  DEBUG_DUMP_PARAMS(a, b, out);
   check_tensor_concat_mla_absorb_q(a, A_LAST_DIM);
   check_tensor_concat_mla_absorb_q(b, B_LAST_DIM);
   check_tensor_concat_mla_absorb_q(out, A_LAST_DIM + B_LAST_DIM);

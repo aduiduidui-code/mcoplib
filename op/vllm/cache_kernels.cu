@@ -16,8 +16,6 @@
 #include <map>
 #include <cfloat>
 #include <vector>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 #if defined(__gfx942__)
 constexpr float kFp8ScaleDivisor = 224.f;
@@ -27,8 +25,6 @@ constexpr float kFp8ScaleDivisor = 448.f;
 
 void swap_blocks(torch::Tensor& src, torch::Tensor& dst,
                  const torch::Tensor& block_mapping) {
-  DEBUG_TRACE_PARAMS(src, dst, block_mapping);
-  DEBUG_DUMP_PARAMS(src, dst, block_mapping);
   torch::Device src_device = src.device();
   torch::Device dst_device = dst.device();
   cudaMemcpyKind memcpy_type;
@@ -68,80 +64,6 @@ void swap_blocks(torch::Tensor& src, torch::Tensor& dst,
     int64_t dst_offset = dst_block_number * block_size_in_bytes;
     cudaMemcpyAsync(dst_ptr + dst_offset, src_ptr + src_offset,
                     block_size_in_bytes, memcpy_type, stream);
-  }
-}
-
-void swap_blocks_batch(const torch::Tensor& src_ptrs,
-                       const torch::Tensor& dst_ptrs,
-                       const torch::Tensor& sizes) {
-  TORCH_CHECK(src_ptrs.device().is_cpu(), "src_ptrs must be on CPU");
-  TORCH_CHECK(dst_ptrs.device().is_cpu(), "dst_ptrs must be on CPU");
-  TORCH_CHECK(sizes.device().is_cpu(), "sizes must be on CPU");
-  TORCH_CHECK(src_ptrs.dtype() == torch::kInt64, "src_ptrs must be int64");
-  TORCH_CHECK(dst_ptrs.dtype() == torch::kInt64, "dst_ptrs must be int64");
-  TORCH_CHECK(sizes.dtype() == torch::kInt64, "sizes must be int64");
-
-  const int64_t n = src_ptrs.size(0);
-  TORCH_CHECK(dst_ptrs.size(0) == n, "dst_ptrs length must match src_ptrs");
-  TORCH_CHECK(sizes.size(0) == n, "sizes length must match src_ptrs");
-
-  if (n == 0) return;
-
-  int64_t* src_data = src_ptrs.mutable_data_ptr<int64_t>();
-  int64_t* dst_data = dst_ptrs.mutable_data_ptr<int64_t>();
-  int64_t* size_data = sizes.mutable_data_ptr<int64_t>();
-
-  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
-  // Use cuMemcpyBatchAsync (CUDA 12.8+) to submit all copies in a single
-  // driver call, amortizing per-copy submission overhead.
-  // int64_t and CUdeviceptr/size_t are both 8 bytes on 64-bit platforms,
-  // so we reinterpret_cast the tensor data directly to avoid copies.
-  static_assert(sizeof(CUdeviceptr) == sizeof(int64_t));
-  static_assert(sizeof(size_t) == sizeof(int64_t));
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-  // Resolve cuMemcpyBatchAsync at runtime via cuGetProcAddress so that
-  // binaries compiled with CUDA 12.8+ still work on older drivers, and
-  // we avoid the CUDA 13.0 header remapping (#define to _v2 signature).
-  // The function pointer is cached after the first call.
-  using BatchFn =
-      CUresult (*)(CUdeviceptr*, CUdeviceptr*, size_t*, size_t,
-                   CUmemcpyAttributes*, size_t*, size_t, size_t*, CUstream);
-  static BatchFn batch_fn = []() -> BatchFn {
-    CUdriverProcAddressQueryResult sym_status;
-    void* fn_ptr = nullptr;
-    CUresult res = cuGetProcAddress("cuMemcpyBatchAsync", &fn_ptr, 12080,
-                                    CU_GET_PROC_ADDRESS_DEFAULT, &sym_status);
-    if (res != CUDA_SUCCESS || fn_ptr == nullptr) {
-      return nullptr;
-    }
-    return reinterpret_cast<BatchFn>(fn_ptr);
-  }();
-
-  if (batch_fn != nullptr) {
-    CUmemcpyAttributes attr = {};
-    attr.srcAccessOrder = CU_MEMCPY_SRC_ACCESS_ORDER_STREAM;
-    size_t attrs_idx = 0;
-    size_t fail_idx = 0;
-    CUresult result = batch_fn(reinterpret_cast<CUdeviceptr*>(dst_data),
-                               reinterpret_cast<CUdeviceptr*>(src_data),
-                               reinterpret_cast<size_t*>(size_data),
-                               static_cast<size_t>(n), &attr, &attrs_idx, 1,
-                               &fail_idx, static_cast<CUstream>(stream));
-    TORCH_CHECK(result == CUDA_SUCCESS, "cuMemcpyBatchAsync failed at index ",
-                fail_idx, " with error ", result);
-  } else
-#endif
-  {
-    // Fallback for CUDA < 12.8, older drivers, and ROCm:
-    // individual async copies.
-    // cudaMemcpyDefault lets the driver infer direction from pointer types.
-    for (int64_t i = 0; i < n; i++) {
-      cudaMemcpyAsync(reinterpret_cast<void*>(dst_data[i]),
-                      reinterpret_cast<void*>(src_data[i]),
-                      static_cast<size_t>(size_data[i]), cudaMemcpyDefault,
-                      stream);
-    }
   }
 }
 
@@ -616,11 +538,6 @@ __global__ void cp_gather_indexer_k_quant_cache_kernel(
   const int head_idx = (blockIdx.y * blockDim.x + threadIdx.x) * VEC_SIZE;
   // Find batch index within a block
   __shared__ int batch_idx[BLOCK_Y_SIZE];
-  if (threadIdx.x == 0) {
-    batch_idx[threadIdx.y] = -1;
-  }
-  __syncthreads();
-
   for (int iter = 0; iter < cuda_utils::ceil_div(batch_size, int(blockDim.x));
        iter++) {
     int tid = iter * blockDim.x + threadIdx.x;
@@ -633,19 +550,16 @@ __global__ void cp_gather_indexer_k_quant_cache_kernel(
     }
   }
 
-
+#ifndef USE_ROCM
   __syncwarp();
+#endif
 
-  // num_tokens may be an allocation upper bound when Python avoids a D2H sync.
-  // Only tokens covered by the exact device-side cu_seq_lens are valid to
-  // gather.
-  const int batch = batch_idx[threadIdx.y];
-  if (head_idx >= head_dim || token_idx >= num_tokens || batch < 0) {
+  if (head_idx >= head_dim || token_idx >= num_tokens) {
     return;
   }
-  const int inbatch_seq_idx = token_idx - cu_seq_lens[batch];
-  const int block_idx =
-      block_table[batch * num_blocks + inbatch_seq_idx / cache_block_size];
+  const int inbatch_seq_idx = token_idx - cu_seq_lens[batch_idx[threadIdx.y]];
+  const int block_idx = block_table[batch_idx[threadIdx.y] * num_blocks +
+                                    inbatch_seq_idx / cache_block_size];
   const int64_t src_block_offset = block_idx * block_stride;
   const int64_t cache_inblock_offset =
       (inbatch_seq_idx % cache_block_size) * head_dim + head_idx;
@@ -743,8 +657,6 @@ void reshape_and_cache(
     torch::Tensor& slot_mapping,  // [num_tokens]
     const std::string& kv_cache_dtype, torch::Tensor& k_scale,
     torch::Tensor& v_scale) {
-  DEBUG_TRACE_PARAMS(key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype, k_scale, v_scale);
-  DEBUG_DUMP_PARAMS(key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype, k_scale, v_scale);
   int num_tokens = slot_mapping.size(0);
   int num_heads = key.size(1);
   int head_size = key.size(2);
@@ -788,8 +700,6 @@ void reshape_and_cache_flash(
     torch::Tensor& slot_mapping,  // [num_tokens] or [num_actual_tokens]
     const std::string& kv_cache_dtype, torch::Tensor& k_scale,
     torch::Tensor& v_scale) {
-  DEBUG_TRACE_PARAMS(key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype, k_scale, v_scale);
-  DEBUG_DUMP_PARAMS(key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype, k_scale, v_scale);
   // NOTE(woosuk): In vLLM V1, key.size(0) can be different from
   // slot_mapping.size(0) because of padding for CUDA graphs.
   // In vLLM V0, key.size(0) is always equal to slot_mapping.size(0) because
@@ -803,28 +713,6 @@ void reshape_and_cache_flash(
   int num_tokens = slot_mapping.size(0);
   int num_heads = key.size(1);
   int head_size = key.size(2);
-  
-  const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
-  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
-  if (kv_cache_dtype == "nvfp4") {
-#if defined(ENABLE_NVFP4_SM100) || defined(ENABLE_NVFP4_SM120)
-    // NVFP4 dispatch is compiled separately for SM100+.
-    extern void reshape_and_cache_nvfp4_dispatch(
-        torch::Tensor & key, torch::Tensor & value, torch::Tensor & key_cache,
-        torch::Tensor & value_cache, torch::Tensor & slot_mapping,
-        torch::Tensor & k_scale, torch::Tensor & v_scale);
-    reshape_and_cache_nvfp4_dispatch(key, value, key_cache, value_cache,
-                                     slot_mapping, k_scale, v_scale);
-    return;
-#else
-    TORCH_CHECK(false,
-                "NVFP4 KV cache requires SM100+ (Blackwell). "
-                "Please rebuild vllm with a Blackwell-compatible CUDA target.");
-#endif
-  }
-
-  // Original FP8/auto path.
   int block_size = key_cache.size(1);
 
   int64_t key_stride = key.stride(0);
@@ -836,6 +724,8 @@ void reshape_and_cache_flash(
 
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * head_size, 512));
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   DISPATCH_BY_KV_CACHE_DTYPE(key.dtype(), kv_cache_dtype,
                              CALL_RESHAPE_AND_CACHE_FLASH);
@@ -873,8 +763,6 @@ void concat_and_cache_mla(
                                   // pe_dim)]
     torch::Tensor& slot_mapping,  // [num_tokens] or [num_actual_tokens]
     const std::string& kv_cache_dtype, torch::Tensor& scale) {
-  DEBUG_TRACE_PARAMS(kv_c, k_pe, kv_cache, slot_mapping, kv_cache_dtype, scale);
-  DEBUG_DUMP_PARAMS(kv_c, k_pe, kv_cache, slot_mapping, kv_cache_dtype, scale);
   // NOTE(woosuk): In vLLM V1, key.size(0) can be different from
   // slot_mapping.size(0) because of padding for CUDA graphs.
   // In vLLM V0, key.size(0) is always equal to slot_mapping.size(0) because
@@ -954,8 +842,6 @@ __global__ void convert_fp8_kernel(const Tin* __restrict__ src_cache,
 // Only for testing.
 void convert_fp8(torch::Tensor& dst_cache, torch::Tensor& src_cache,
                  const double scale, const std::string& kv_cache_dtype) {
-  DEBUG_TRACE_PARAMS(dst_cache, src_cache, scale, kv_cache_dtype);
-  DEBUG_DUMP_PARAMS(dst_cache, src_cache, scale, kv_cache_dtype);
   torch::Device src_device = src_cache.device();
   torch::Device dst_device = dst_cache.device();
   TORCH_CHECK(src_device.is_cuda(), "src must be on a GPU")
@@ -1126,8 +1012,6 @@ void gather_and_maybe_dequant_cache(
     int64_t num_tokens, const std::string& kv_cache_dtype,
     torch::Tensor const& scale,
     std::optional<torch::Tensor> seq_starts = std::nullopt) {
-  DEBUG_TRACE_PARAMS(src_cache, dst, block_table, cu_seq_lens, token_to_seq, num_tokens, kv_cache_dtype, scale);
-  DEBUG_DUMP_PARAMS(src_cache, dst, block_table, cu_seq_lens, token_to_seq, num_tokens, kv_cache_dtype, scale);
   at::cuda::OptionalCUDAGuard device_guard(src_cache.device());
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -1343,8 +1227,6 @@ void cp_gather_cache(
     torch::Tensor const& cu_seq_lens,  // [BATCH+1]
     int64_t batch_size,
     std::optional<torch::Tensor> seq_starts = std::nullopt) {
-  DEBUG_TRACE_PARAMS(src_cache, dst, block_table, cu_seq_lens, batch_size, seq_starts);
-  DEBUG_DUMP_PARAMS(src_cache, dst, block_table, cu_seq_lens, batch_size, seq_starts);
   at::cuda::OptionalCUDAGuard device_guard(src_cache.device());
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -1406,8 +1288,6 @@ void cp_gather_and_upconvert_fp8_kv_cache(
     torch::Tensor const& seq_lens,          // [BATCH]
     torch::Tensor const& workspace_starts,  // [BATCH]
     int64_t batch_size) {
-  DEBUG_TRACE_PARAMS(src_cache, dst, block_table, seq_lens, workspace_starts, batch_size);
-  DEBUG_DUMP_PARAMS(src_cache, dst, block_table, seq_lens, workspace_starts, batch_size);
   at::cuda::OptionalCUDAGuard device_guard(src_cache.device());
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -1481,8 +1361,6 @@ void indexer_k_cache(
     torch::Tensor& kv_cache,     // [num_blocks, block_size, cache_stride]
     torch::Tensor& slot_mapping  // [num_tokens]
 ) {
-  DEBUG_TRACE_PARAMS(k, kv_cache, slot_mapping);
-  DEBUG_DUMP_PARAMS(k, kv_cache, slot_mapping);
   int num_tokens = k.size(0);
   int head_dim = k.size(1);
   int cache_block_size = kv_cache.size(1);
@@ -1516,8 +1394,6 @@ void indexer_k_quant_and_cache(
     torch::Tensor& slot_mapping,  // [num_tokens]
     int64_t quant_block_size,     // quantization block size
     const std::string& scale_fmt) {
-  DEBUG_TRACE_PARAMS(k, kv_cache, slot_mapping, quant_block_size, scale_fmt);
-  DEBUG_DUMP_PARAMS(k, kv_cache, slot_mapping, quant_block_size, scale_fmt);
   int num_tokens = k.size(0);
   int head_dim = k.size(1);
   int cache_block_size = kv_cache.size(1);
@@ -1563,8 +1439,6 @@ void cp_gather_indexer_k_cache(
     const torch::Tensor& block_table,  // [batch_size, num_blocks]
     const torch::Tensor& cu_seq_lens   // [batch_size + 1]
 ) {
-  DEBUG_TRACE_PARAMS(kv_cache, dst_k, block_table, cu_seq_lens);
-  DEBUG_DUMP_PARAMS(kv_cache, dst_k, block_table, cu_seq_lens);
   int batch_size = block_table.size(0);
   int num_tokens = dst_k.size(0);
   int head_dim = dst_k.size(1);
@@ -1622,8 +1496,6 @@ void cp_gather_indexer_k_quant_cache(
     const torch::Tensor& block_table,  // [batch_size, num_blocks]
     const torch::Tensor& cu_seq_lens   // [batch_size + 1]
 ) {
-  DEBUG_TRACE_PARAMS(kv_cache, dst_k, dst_scale, block_table, cu_seq_lens);
-  DEBUG_DUMP_PARAMS(kv_cache, dst_k, dst_scale, block_table, cu_seq_lens);
   int batch_size = block_table.size(0);
   int num_tokens = dst_k.size(0);
   int head_dim = dst_k.size(1);
@@ -1667,8 +1539,6 @@ void concat_mla_q(torch::Tensor& ql_nope,  // [num_tokens, num_heads, nope_dim]
                   torch::Tensor& q_out     // [num_tokens, num_heads, nope_dim +
                                            // rope_dim]
 ) {
-  DEBUG_TRACE_PARAMS(ql_nope, q_pe, q_out);
-  DEBUG_DUMP_PARAMS(ql_nope, q_pe, q_out);
   const int num_tokens = ql_nope.size(0);
   const int num_heads = ql_nope.size(1);
   const int nope_dim = ql_nope.size(2);

@@ -1,7 +1,5 @@
 #include "utils.h"
 #include "arithm.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 template <typename T> __device__ __forceinline__ T saturate_cast(uchar v) { return T(v); }
 template <typename T> __device__ __forceinline__ T saturate_cast(schar v) { return T(v); }
@@ -357,8 +355,6 @@ __global__ void arithm_mask_kernel_no_padding(const T* __restrict input0, const 
 template<typename T, typename D>
 void AddOp(const T* __restrict input0, const T* __restrict input1, const unsigned char* __restrict mask, D* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -409,8 +405,6 @@ template void AddOp<double, double>(const double * __restrict input0, const doub
 template<typename T, typename D>
 void SubOp(const T* __restrict input0, const T* __restrict input1, const unsigned char* __restrict mask, D* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -461,8 +455,6 @@ template void SubOp<double, double>(const double * __restrict input0, const doub
 template<typename T>
 void LessOp(const T* __restrict input0, const T* __restrict input1, unsigned char* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -481,8 +473,6 @@ template void LessOp<double>(const double* __restrict input0, const double* __re
 template<typename T>
 void LargerOp(const T* __restrict input0, const T* __restrict input1, unsigned char* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -501,8 +491,6 @@ template void LargerOp<double>(const double* __restrict input0, const double* __
 template<typename T>
 void EqualOp(const T* __restrict input0, const T* __restrict input1, unsigned char* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -521,8 +509,6 @@ template void EqualOp<double>(const double* __restrict input0, const double* __r
 template<typename T>
 void LessEqualOp(const T* __restrict input0, const T* __restrict input1, unsigned char* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -541,8 +527,6 @@ template void LessEqualOp<double>(const double* __restrict input0, const double*
 template<typename T>
 void LargerEqualOp(const T* __restrict input0, const T* __restrict input1, unsigned char* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -561,8 +545,6 @@ template void LargerEqualOp<double>(const double* __restrict input0, const doubl
 template<typename T>
 void NotEqualOp(const T* __restrict input0, const T* __restrict input1, unsigned char* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -599,8 +581,6 @@ template <typename T, typename S, typename D> struct MulScale : binary_function<
 template<typename T, typename S, typename D>
 void MulOp(const T* __restrict input0, const T* __restrict input1, D* __restrict dst, const double scale, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, dst, scale, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, dst, scale, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -680,8 +660,6 @@ template <typename T> struct bit_xor : binary_function<T, T, T>
 template<typename T, typename D>
 void BitAndOp(const T* __restrict input0, const T* __restrict input1, const unsigned char* __restrict mask, D* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -696,8 +674,6 @@ void BitAndOp(const T* __restrict input0, const T* __restrict input1, const unsi
 template<typename T, typename D>
 void BitOrOp(const T* __restrict input0, const T* __restrict input1, const unsigned char* __restrict mask, D* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);
@@ -712,8 +688,6 @@ void BitOrOp(const T* __restrict input0, const T* __restrict input1, const unsig
 template<typename T, typename D>
 void BitXorOp(const T* __restrict input0, const T* __restrict input1, const unsigned char* __restrict mask, D* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input0, input1, mask, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);

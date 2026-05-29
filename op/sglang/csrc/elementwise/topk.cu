@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /**
  * @NOTE: This file is adapted from
  * https://github.com/tile-ai/tilelang/blob/main/examples/deepseek_v32/topk_selector.py
@@ -18,9 +17,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
-
 
 namespace {
 
@@ -416,8 +412,6 @@ void setup_kernel_smem_once() {
 
 void fast_topk_interface(
     const at::Tensor& score, at::Tensor& indices, const at::Tensor& lengths, std::optional<at::Tensor> row_starts_opt) {
-  DEBUG_TRACE_PARAMS(score, indices, lengths, row_starts_opt);
-  DEBUG_DUMP_PARAMS(score, indices, lengths, row_starts_opt);
   CHECK_CUDA(score);
   CHECK_CUDA(indices);
   if (row_starts_opt.has_value()) {
@@ -442,8 +436,6 @@ void fast_topk_transform_interface(
     const at::Tensor& src_page_table,
     const at::Tensor& cu_seqlens_q,
     std::optional<at::Tensor> row_starts_opt) {
-  DEBUG_TRACE_PARAMS(score, lengths, dst_page_table, src_page_table, cu_seqlens_q, row_starts_opt);
-  DEBUG_DUMP_PARAMS(score, lengths, dst_page_table, src_page_table, cu_seqlens_q, row_starts_opt);
   CHECK_CUDA(score);
   CHECK_CUDA(lengths);
   CHECK_CUDA(dst_page_table);
@@ -499,8 +491,6 @@ void fast_topk_transform_ragged_interface(
     at::Tensor& topk_indices_ragged,
     const at::Tensor& topk_indices_offset,
     std::optional<at::Tensor> row_starts_opt) {
-  DEBUG_TRACE_PARAMS(score, lengths, topk_indices_ragged, topk_indices_offset, row_starts_opt);
-  DEBUG_DUMP_PARAMS(score, lengths, topk_indices_ragged, topk_indices_offset, row_starts_opt);
   CHECK_CUDA(score);
   CHECK_CUDA(lengths);
   CHECK_CUDA(topk_indices_ragged);

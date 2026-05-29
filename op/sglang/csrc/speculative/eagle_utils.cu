@@ -1,5 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
+ * Copyright (c) 2025 by SGLang team.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -21,8 +22,6 @@
 #else
 #include "pytorch_extension_utils_rocm.h"
 #endif
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 typedef enum { FULL_MASK = 0, QLEN_ONLY = 1, QLEN_ONLY_BITPACKING = 2 } TreeMaskMode;
 
@@ -225,8 +224,6 @@ void build_tree_kernel_efficient(
     int64_t depth,
     int64_t draft_token_num,
     int64_t tree_mask_mode) {
-  DEBUG_TRACE_PARAMS(parent_list, selected_index, verified_seq_len, tree_mask, positions, retrive_index, retrive_next_token, retrive_next_sibling, topk, depth, draft_token_num, tree_mask_mode);
-  DEBUG_DUMP_PARAMS(parent_list, selected_index, verified_seq_len, tree_mask, positions, retrive_index, retrive_next_token, retrive_next_sibling, topk, depth, draft_token_num, tree_mask_mode);
   // TODO (ying) check shape
   // TODO (ying) check type
   int bs = parent_list.size(0);
@@ -332,8 +329,6 @@ void verify_tree_greedy(
     at::Tensor retrive_next_token,
     at::Tensor retrive_next_sibling,
     at::Tensor target_predict) {
-  DEBUG_TRACE_PARAMS(predicts, accept_index, accept_token_num, candidates, retrive_index, retrive_next_token, retrive_next_sibling, target_predict);
-  DEBUG_DUMP_PARAMS(predicts, accept_index, accept_token_num, candidates, retrive_index, retrive_next_token, retrive_next_sibling, target_predict);
   CHECK_INPUT(candidates);
   CHECK_INPUT(retrive_index);
   CHECK_INPUT(retrive_next_token);
