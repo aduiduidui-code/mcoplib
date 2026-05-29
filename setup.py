@@ -308,75 +308,8 @@ class cmake_build_ext(build_ext):
             f"-j={num_jobs}",
             *[f"--target={name}" for name in targets],
         ]
-        # Run cmake build and capture output for failure detection.
-        # The cmake_mock wrapper may swallow the ninja/make exit code,
-        # so we also check the output for failure indicators.
-        # We detect errors during line-by-line reading so the build
-        # stops immediately and the error is the last output printed.
-        failure_indicators = [
-            "ninja: build stopped",
-            "make: *** [",
-        ]
-        early_failure_indicators = [
-            "FAILED: ",
-            "error: ",
-        ]
-        build_proc = subprocess.Popen(
-            [CMAKE_EXECUTABLE, *build_args],
-            cwd=build_temp,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        build_output_lines = []
-        build_failed = False
-        saw_early_failure = False
-        error_lines = []  # Collect error context for better diagnostics
-        for line in build_proc.stdout:
-            # Add prefix to error lines for easier identification
-            if any(indicator in line for indicator in early_failure_indicators):
-                sys.stdout.write(f"[ERROR] {line}")
-                sys.stdout.flush()
-                error_lines.append(line)
-            else:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-            build_output_lines.append(line)
-            for indicator in early_failure_indicators:
-                if indicator in line:
-                    saw_early_failure = True
-            for indicator in failure_indicators:
-                if indicator in line:
-                    build_failed = True
-                    # Print error context immediately
-                    print("\n" + "="*60, file=sys.stderr)
-                    print("BUILD FAILED - Error detected during compilation", file=sys.stderr)
-                    print("="*60, file=sys.stderr)
-                    if error_lines:
-                        print("Error context:", file=sys.stderr)
-                        for err_line in error_lines[-5:]:  # Show last 5 error lines
-                            print(f"  {err_line}", file=sys.stderr, end='')
-                    print("="*60 + "\n", file=sys.stderr)
-                    build_proc.terminate()
-                    try:
-                        build_proc.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        build_proc.kill()
-                        build_proc.wait()
-                    break
-            if build_failed:
-                break
-        else:
-            build_proc.wait()
-            if build_proc.returncode != 0 or saw_early_failure:
-                build_failed = True
-        build_output = "".join(build_output_lines)
+        subprocess.check_call([CMAKE_EXECUTABLE, *build_args], cwd=build_temp)
 
-        if build_failed:
-            raise RuntimeError(
-                f"CMake build failed (exit code {build_proc.returncode}). "
-                f"Check the build output above for errors."
-            )
 
         # Install the libraries
         for ext in cmake_extensions:
@@ -492,10 +425,29 @@ def get_maca_version():
     return first_line.split(":")[-1]
 
 def get_maca_version_list():
+    """
+    解析 MACA 版本号，兼容带字母后缀的版本（如 3.5.3.20.dsv4）。
+    返回始终为 4 个元素的字符串列表: [MAJOR, MINOR, PATCH, BUILD]
+    """
     version_str = get_maca_version()
-    version_list = list(map(int, (version_str or "0.0.0.0").split('.')))
-    version_list.extend([0] * (4 - len(version_list)))
-    return version_list
+    if not version_str:
+        return ["0", "0", "0", "0"]
+    
+    # 按照点号分割: "3.5.3.20.dsv4" -> ['3', '5', '3', '20', 'dsv4']
+    parts = version_str.split('.')
+    
+    major = parts[0] if len(parts) > 0 else "0"
+    minor = parts[1] if len(parts) > 1 else "0"
+    patch = parts[2] if len(parts) > 2 else "0"
+    
+    # 将第4位以及后续所有的后缀重新组合作为 BUILD 版本
+    # 这样 '20' 和 'dsv4' 组合成 '20.dsv4'，防止丢失信息
+    if len(parts) > 3:
+        build = ".".join(parts[3:])
+    else:
+        build = (parts[3] if len(parts) > 3 else "0")
+        
+    return [major, minor, patch, build]
 
 def get_git_commit():
     curdir = os.path.dirname(__file__)
@@ -569,17 +521,26 @@ def check_requirements_or_exit():
 
 
 def get_repository_version() -> str:
-    #version = get_version(write_to="vllm/_version.py")
-    #commit_id = get_git_commit()
+    """
+    获取打包版本号，严格遵循 PEP-440 规范。
+    """
     version = mcoplib_version
     sep = "+" if "+" not in version else "."  # dev versions might contain +
 
-
     maca_version_str = get_maca_version()
+    
     torch_version = torch.__version__
     major_minor_version = ".".join(torch_version.split(".")[:2])
-    version += f"{sep}maca{maca_version_str}-torch{major_minor_version}"
-    #:0.1.0+maca3.0.0.8torch2.6
+    
+    # 注意：PEP-440 规定 local version (+ 后面的内容) 只能包含字母、数字和点号。
+    # 必须把原本的 '-torch' 改为 '.torch'，否则 setuptools/wheel 打包会报错。
+    if maca_version_str:
+        # 去除 MACA 字符串中可能存在的不合规连字符
+        safe_maca_version = maca_version_str.replace("-", ".")
+        version += f"{sep}maca{safe_maca_version}.torch{major_minor_version}"
+    else:
+        version += f"{sep}torch{major_minor_version}"
+        
     return version
 
 def git_available() -> bool:

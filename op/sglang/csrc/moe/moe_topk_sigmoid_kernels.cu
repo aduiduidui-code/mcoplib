@@ -27,8 +27,6 @@ limitations under the License.
 #include <hipcub/hipcub.hpp>
 #include <hipcub/util_type.hpp>
 #endif
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 #include "utils.h"
 
@@ -513,8 +511,6 @@ void topk_sigmoid(
     const bool renormalize,
     const c10::optional<torch::Tensor>& correction_bias,
     const c10::optional<torch::Tensor>& num_token_non_padded) {
-  DEBUG_TRACE_PARAMS(topk_weights, topk_indices, gating_output, renormalize, correction_bias);
-  DEBUG_DUMP_PARAMS(topk_weights, topk_indices, gating_output, renormalize, correction_bias);
   // Check data type
   TORCH_CHECK(
       gating_output.scalar_type() == at::ScalarType::Float || gating_output.scalar_type() == at::ScalarType::Half ||

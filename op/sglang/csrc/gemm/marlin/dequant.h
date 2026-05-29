@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
 Fast Dequantization (Converting INT4/INT8/FP4/FP8 to FP16/BF16)
 
@@ -93,7 +92,12 @@ __device__ inline void dequant(int q, scalar_t2* frag_b);
 
 //
 // Efficiently dequantize 4bit values packed in an int32 value into a full
-// B-fragment of 4 fp16 values. We mostly follow the strategy in the link below
+// B-fragment of 4 fp16 values. We mostly follow the strategy in the link below,
+// with some small changes:
+// - FP16:
+// https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h#L215-L287
+// - BF16:
+// https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h#L327-L385
 //
 template <>
 __device__ inline void dequant<half2, sglang::kU4B8.id(), true>(int q, half2* frag_b) {
@@ -194,6 +198,14 @@ __device__ inline void dequant<nv_bfloat162, sglang::kU4.id(), false>(int q, nv_
   frag_b[1] = __hsub2(frag_b[1], *reinterpret_cast<const nv_bfloat162*>(&SUB));
 }
 
+//
+// Fast Int8ToFp16/Int8ToBf16: Efficiently dequantize 8bit int values to fp16 or
+// bf16 Reference:
+// - FP16:
+// https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h#L53-L85
+// - BF16:
+// https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h#L125-L175
+//
 template <>
 __device__ inline void dequant<half2, sglang::kU8B128.id(), true>(int q, half2* frag_b) {
   static constexpr uint32_t mask_for_elt_01 = 0x5250;

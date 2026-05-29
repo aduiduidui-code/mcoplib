@@ -14,6 +14,7 @@ import torch
 #
 # Marlin works on [16*2,64] tiles. The goal of the permutations is to reorder the weight data so that it is compatible noqa: # noqa: E501
 # with the tensor-core format that is described here:
+# https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#matrix-fragments-for-mma-m16n8k16-with-floating-point-type # noqa: E501
 #
 # As a result of this reordering, the vector loads inside the kernel will get the data as it is needed for tensor-core # noqa: E501
 # (without the need to use ldmatrix instructions) # noqa: E501

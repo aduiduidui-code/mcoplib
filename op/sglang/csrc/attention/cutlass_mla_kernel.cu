@@ -1,5 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
+Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+Copyright 2025 SGLang Team. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -160,10 +161,12 @@ typename T::Fmha::Arguments args_from_options(
       {static_cast<ElementOut*>(out.data_ptr()), stride_O, static_cast<ElementAcc*>(nullptr), stride_LSE},
       hw_info,
       // TODO(trevor-m): Change split_kv back to -1 when
+      // https://github.com/NVIDIA/cutlass/issues/2274 is fixed. Split_kv=1 will
       // perform worse with larger context length and smaller batch sizes.
       static_cast<int>(num_kv_splits), // split_kv
       nullptr,       // is_var_split_kv
   };
+  // TODO(kaixih@nvidia): When split_kv=-1 and is_var_split_kv=false, we compute
   // split_kv automatically based on batch size and sequence length to balance
   // workload across available SMs. Consider using var_split_kv for manual
   // control if needed.

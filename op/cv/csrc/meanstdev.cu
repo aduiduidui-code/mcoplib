@@ -1,7 +1,5 @@
 #include "utils.h"
 #include "calsum.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 template<typename T>
 __device__ __forceinline__ T ScanWarp(T val) {
@@ -141,8 +139,6 @@ __global__ void std_no_mask_kernel(const T* __restrict input, const D* __restric
 template<typename T, typename D>
 void MeanStdevOp(const T* __restrict input, D* __restrict mean, D* __restrict std, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input, mean, std, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input, mean, std, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);

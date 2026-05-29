@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
@@ -136,6 +135,7 @@ cvt_fp16_to_fp4(
   // Input tensor row/col loops.
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int colsPerRow = numCols / CVT_FP4_ELTS_PER_THREAD;
+  // TODO(kaixih@nvidia): For now, we assume mask is used together with
   // silu_and_mal. Maybe we want a more general behavior of mask later. In the
   // silu case, the input last dim doubles.
   bool use_mask = mask != nullptr;
@@ -274,6 +274,7 @@ cvt_fp16_to_fp4_expert(
   int padded_m = (m + (128 - 1)) / 128 * 128;
 
   int colsPerRow = numCols / CVT_FP4_ELTS_PER_THREAD;
+  // TODO(kaixih@nvidia): For now, we assume mask is used together with
   // silu_and_mal. Maybe we want a more general behavior of mask later. In the
   // silu case, the input last dim doubles.
   bool use_mask = mask != nullptr;
@@ -465,6 +466,7 @@ void quant_impl(
     block.x = (block.x + 1) / 2;
   }
 
+  // TODO(kaixih@nvidia): Should relax this to allow any grid size.
   if (mask != nullptr) {
     grid.x = (grid.x + n_experts - 1) / n_experts * n_experts;
     cvt_fp16_to_fp4_expert<T, false><<<grid, block, 0, stream>>>(
@@ -601,6 +603,7 @@ void scaled_fp4_experts_quant_sm100a(
   TORCH_CHECK(output.size(0) == m_topk);
   TORCH_CHECK(output.size(1) == k / 2);
   int scales_k = k / BLOCK_SIZE;
+  // 4 means the swizzle requirement by nvidia nvfp4.
   int padded_k = (scales_k + (4 - 1)) / 4 * 4;
   // 4 means 4 fp8 values are packed into one int32
   TORCH_CHECK(output_scale.size(1) * 4 == padded_k);
@@ -683,6 +686,7 @@ void silu_and_mul_scaled_fp4_experts_quant_sm100a(
   TORCH_CHECK(output.size(0) == m_topk);
   TORCH_CHECK(output.size(1) == k / 2);
   int scales_k = k / BLOCK_SIZE;
+  // 4 means the swizzle requirement by nvidia nvfp4.
   int padded_k = (scales_k + (4 - 1)) / 4 * 4;
   // 4 means 4 fp8 values are packed into one int32
   TORCH_CHECK(output_scale.size(1) * 4 == padded_k);

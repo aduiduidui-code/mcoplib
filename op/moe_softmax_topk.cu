@@ -88,7 +88,6 @@ void topkGatingSoftmaxKernelLauncher(
     const int topk,
     const bool pre_softmax,
     cudaStream_t stream) {
-    (void)pre_softmax;
 
     if (num_experts >= 1024) {
         const int sortBlockSize = getSortSize(topk);
@@ -138,6 +137,14 @@ void topkGatingSoftmaxKernelLauncher(
         }
         return;
     }
+    // if (!pre_softmax) {
+    //     static constexpr int TPB = 256;
+    //     mc_moe_softmax_topk::moeTopKSoftmax<scalar_t, TPB><<<num_tokens, TPB, sizeof(scalar_t) * topk, stream>>>(
+    //         gating_output, topk_weights, topk_indicies,
+    //         num_experts, topk, 0, num_experts);
+    //     return;
+    // }
+
     static constexpr int WARPS_PER_TB = 4;
     switch (num_experts) {
         case 1:

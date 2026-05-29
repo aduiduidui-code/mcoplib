@@ -9,8 +9,6 @@
 #include "attention_utils.cuh"
 #include "../quantization/fp8/common.cuh"
 #include "../dispatch_utils.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace vllm {
 
@@ -315,8 +313,6 @@ void merge_attn_states(torch::Tensor& output,
                        const torch::Tensor& suffix_lse,
                        std::optional<int64_t> prefill_tokens_with_context,
                        const std::optional<torch::Tensor>& output_scale) {
-  DEBUG_TRACE_PARAMS(output, output_lse, prefix_output, prefix_lse, suffix_output, suffix_lse, prefill_tokens_with_context, output_scale);
-  DEBUG_DUMP_PARAMS(output, output_lse, prefix_output, prefix_lse, suffix_output, suffix_lse, prefill_tokens_with_context, output_scale);
   if (output_scale.has_value()) {
     TORCH_CHECK(output.scalar_type() == at::ScalarType::Float8_e4m3fn ||
                     output.scalar_type() == at::ScalarType::Float8_e4m3fnuz,

@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <ATen/cuda/CUDAContext.h>
 #include <cuda_runtime.h>
 #include <mctlass/array.h>
@@ -9,8 +8,6 @@
 
 #include <cfloat>
 #include <type_traits>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 template <typename T, int N>
 using AlignedArray = mctlass::AlignedArray<T, N>;
 using bfloat16_t   = mctlass::bfloat16_t;
@@ -388,8 +385,6 @@ std::vector<at::Tensor> moe_fused_gate(
     int64_t num_fused_shared_experts,
     double routed_scaling_factor,
     bool apply_routed_scaling_factor_on_output) {
-  DEBUG_TRACE_PARAMS(input, bias, num_expert_group, topk_group, topk, num_fused_shared_experts, routed_scaling_factor, apply_routed_scaling_factor_on_output);
-  DEBUG_DUMP_PARAMS(input, bias, num_expert_group, topk_group, topk, num_fused_shared_experts, routed_scaling_factor, apply_routed_scaling_factor_on_output);
   TORCH_CHECK(input.dtype() == bias.dtype(), "input and bias should have the same dtype");
 
   int64_t num_rows = input.size(0);

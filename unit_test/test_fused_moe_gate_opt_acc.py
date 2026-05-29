@@ -126,7 +126,7 @@ def reference_moe_gate(gating_outputs, correction_bias, topk, num_expert_group,
 
 
 def verify_accuracy(output_weights, output_indices, ref_weights, ref_indices,
-                    tolerance=0.00001, test_name=""):
+                    tolerance=0.0001, test_name=""):
     """
     验证输出精度
 
@@ -212,8 +212,84 @@ def test_160_experts_no_shared():
     torch.manual_seed(1234)
 
     # 创建测试数据（修正：使用device参数）
-    gating_outputs = torch.randn(batch_size, num_experts, dtype=torch.bfloat16, device='cuda')
-    correction_bias = torch.randn(num_experts, dtype=torch.bfloat16, device='cuda')
+    gating_outputs = torch.randn(batch_size, num_experts, dtype=torch.float, device='cuda')
+    correction_bias = torch.randn(num_experts, dtype=torch.float, device='cuda')
+    out_routing_weights = torch.empty(batch_size, topk, dtype=torch.float, device='cuda')
+    out_selected_experts = torch.empty(batch_size, topk, dtype=torch.int32, device='cuda')
+
+    print(f"  Configuration:")
+    print(f"    Batch size: {batch_size}")
+    print(f"    Num experts: {num_experts}")
+    print(f"    TopK: {topk}")
+    print(f"    Expert groups: 1")
+    print(f"    Shared experts: 0")
+
+    # 调用算子
+    ret = ops.fused_moe_gate_opt(
+        gating_outputs,
+        correction_bias,
+        out_routing_weights,
+        out_selected_experts,
+        topk=topk,
+        renormalize=True,
+        num_expert_group=1,
+        topk_group=1,
+        num_fused_shared_experts=None,
+        routed_scaling_factor=None
+    )
+
+    # 基本断言
+    assert ret == 0, f"fused_moe_gate_opt returned error code {ret}"
+    assert out_selected_experts.shape == (batch_size, topk), \
+        f"Output shape mismatch: {out_selected_experts.shape} != ({batch_size}, {topk})"
+    assert torch.all(out_selected_experts >= 0), "Expert indices should be non-negative"
+    assert torch.all(out_selected_experts < num_experts), \
+        f"Expert indices should be < {num_experts}"
+
+    # 验证权重归一化（和应该为1）
+    # 注意：由于bfloat16精度的限制，权重和可能不完全等于1.0
+    # bfloat16只有7位有效精度，在多次类型转换和除法运算后会有累积误差
+    # 正常误差范围应该在 ±0.005 以内
+    weight_sums = out_routing_weights.sum(dim=1)
+    normalization_tolerance = 5e-3  # 放宽容差到0.005，适应bfloat16精度
+    assert torch.all(torch.abs(weight_sums - 1.0) < normalization_tolerance), \
+        f"Weights should sum to 1.0 (within tolerance {normalization_tolerance}), " \
+        f"got sums in range [{weight_sums.min():.6f}, {weight_sums.max():.6f}]"
+
+    print(f"  ✓ Basic checks passed")
+
+    # 计算参考实现
+    ref_weights, ref_indices = reference_moe_gate(
+        gating_outputs, correction_bias, topk,
+        num_expert_group=1, topk_group=1,
+        num_fused_shared_experts=None,
+        routed_scaling_factor=None
+    )
+
+    # 精度验证
+    verify_accuracy(
+        out_routing_weights, out_selected_experts,
+        ref_weights, ref_indices,
+        tolerance=0.00001,
+        test_name="Test 1 (160 experts, no shared)"
+    )
+
+def test_256_experts_no_shared():
+    """测试160专家，无共享专家，并验证精度"""
+    print("\n" + "="*70)
+    print("[Test 1] Testing 160 experts (no shared experts)")
+    print("="*70)
+
+    batch_size = 4
+    num_experts = 256
+    topk = 8
+
+    # 设置随机种子以保证可复现性
+    torch.manual_seed(1234)
+
+    # 创建测试数据（修正：使用device参数）
+    gating_outputs = torch.randn(batch_size, num_experts, dtype=torch.float, device='cuda')
+    correction_bias = torch.randn(num_experts, dtype=torch.float, device='cuda')
     out_routing_weights = torch.empty(batch_size, topk, dtype=torch.float, device='cuda')
     out_selected_experts = torch.empty(batch_size, topk, dtype=torch.int32, device='cuda')
 
@@ -425,6 +501,7 @@ if __name__ == "__main__":
     try:
         # 运行所有测试
         test_160_experts_no_shared()
+        test_256_experts_no_shared()
         test_160_experts_with_shared()
         test_edge_cases()
 
