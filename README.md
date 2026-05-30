@@ -8,11 +8,11 @@ docker run  -it  --name=mcoplib-build  --shm-size 16384m --device=/dev/dri --dev
 安装编译依赖：
 ```shell
 #安装cmake, 注意：如果是镜像中编译，又是把代码放在到网络共享盘中的，则先需要切换到root用户，在root用户下安装cmake
-pip3 install cmake==3.26.3
+pip3 install cmake==3.26.3 -i  https://repo.metax-tech.com/r/pypi/simple
 #安装pybind11
-pip3 install pybind11 
-pip3 install build
-pip3 install setuptools-scm==8.0 
+pip3 install pybind11 -i  https://repo.metax-tech.com/r/pypi/simple
+pip3 install build -i  https://repo.metax-tech.com/r/pypi/simple
+pip3 install setuptools-scm==8.0 -i  https://repo.metax-tech.com/r/pypi/simple
 ```
 环境变量设置：
 

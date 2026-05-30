@@ -1,10 +1,14 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #pragma once
 
 /**
  * @file w4a8_grouped_mm_c3x.cuh
  * @brief Implementation of grouped GEMM operation with int4 and fp8 mixed
  * precision
+ *
+ * This file implements a grouped GEMM operation that multiplies FP8 matrices
+ * (A) with quantized INT4 matrices (B), applying per-block scaling factors.
+ * The implementation is optimized for NVIDIA Hopper GPUs, leveraging Tensor
+ * Cores for mixed precision arithmetic.
  *
  * Key features:
  * - Supports grouped GEMM operations with multiple experts
@@ -119,6 +123,12 @@ struct cutlass_3x_w4a8_group_gemm {
 
 /**
  * @brief Main function to run int4 * fp8 grouped GEMM from PyTorch
+ *
+ * This function performs multiple GEMM operations in parallel where each
+ * operation multiplies an FP8 matrix (A) with a quantized INT4 matrix (B),
+ * applying per-channel scaling factors. It's designed for efficient execution
+ * on NVIDIA Hopper GPUs, leveraging Tensor Cores for optimal performance with
+ * mixed precision arithmetic.
  *
  * The function includes preprocessing steps for both INT4 tensors and scale
  * factors to ensure optimal performance and correct operation.

@@ -2,11 +2,6 @@ DEFAULT_DIR="/opt/maca"
 USER_HOME="$HOME"
 echo "cur user home dir:$USER_HOME"
 
-# Add conda bin to PATH if conda exists
-if [ -d "/opt/conda/bin" ]; then
-    export PATH=/opt/conda/bin:$PATH
-fi
-
 export MACA_PATH=${1:-$DEFAULT_DIR}
 export CUDA_PATH=${USER_HOME}/cu-bridge/CUDA_DIR
 export CUCC_PATH=${MACA_PATH}/tools/cu-bridge

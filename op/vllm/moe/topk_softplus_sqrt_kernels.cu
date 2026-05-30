@@ -23,14 +23,12 @@
 #include <c10/cuda/CUDAGuard.h>
 #include "../cuda_compat.h"
 #include "../cub_helpers.h"
-#include <cuda_bf16.h>
-#include <cuda_fp16.h>
 #ifndef USE_ROCM
-    #include <cuda_bf16.h>
-    #include <cuda_fp16.h>
+  #include <cuda_bf16.h>
+  #include <cuda_fp16.h>
 #else
-    #include <hip/hip_bf16.h>
-    #include <hip/hip_fp16.h>
+  #include <hip/hip_bf16.h>
+  #include <hip/hip_fp16.h>
 typedef __hip_bfloat16 __nv_bfloat16;
 typedef __hip_bfloat162 __nv_bfloat162;
 #endif
@@ -481,27 +479,27 @@ void topkGatingSoftplusSqrtLauncherHelper(
     auto* kernel =
         &topkGatingSoftplusSqrt<VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG,
                                 WARP_SIZE_PARAM, USE_HASH, IndType, InputType>;
-#ifndef USE_ROCM
-    cudaLaunchConfig_t config = {};
-    config.gridDim = num_blocks;
-    config.blockDim = block_dim;
-    config.dynamicSmemBytes = 0;
-    config.stream = stream;
-    cudaLaunchAttribute attrs[1];
-    attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
-    attrs[0].val.programmaticStreamSerializationAllowed = 1;
-    config.numAttrs = 1;
-    config.attrs = attrs;
-    cudaLaunchKernelEx(&config, kernel, input, finished, output, num_rows,
-                       indices, source_row, k, start_expert, end_expert,
-                       renormalize, routed_scaling_factor, correction_bias,
-                       input_ids, tid2eid);
-#else
+//#ifndef USE_ROCM
+//    cudaLaunchConfig_t config = {};
+//    config.gridDim = num_blocks;
+//    config.blockDim = block_dim;
+//    config.dynamicSmemBytes = 0;
+//    config.stream = stream;
+//    cudaLaunchAttribute attrs[1];
+//    attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
+//    attrs[0].val.programmaticStreamSerializationAllowed = 1;
+//    config.numAttrs = 1;
+//    config.attrs = attrs;
+//    cudaLaunchKernelEx(&config, kernel, input, finished, output, num_rows,
+//                       indices, source_row, k, start_expert, end_expert,
+//                       renormalize, routed_scaling_factor, correction_bias,
+//                       input_ids, tid2eid);
+//#else
     kernel<<<num_blocks, block_dim, 0, stream>>>(
         input, finished, output, num_rows, indices, source_row, k, start_expert,
         end_expert, renormalize, routed_scaling_factor, correction_bias,
         input_ids, tid2eid);
-#endif
+//#endif
   })
 }
 

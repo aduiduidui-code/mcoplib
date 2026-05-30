@@ -112,23 +112,45 @@ __device__ __forceinline__ float4 rms_rsqrt(float4& v, float eps) {
   return v;
 }
 //todo: ptx2cpp
-__device__ __forceinline__ float4 ld_global_volatile(float4* addr) {
-  float4 val;
-  asm volatile("ld.volatile.global.v4.f32 {%0, %1, %2, %3}, [%4];"
-               : "=f"(val.x), "=f"(val.y), "=f"(val.z), "=f"(val.w)
-               : "l"(addr));
-  return val;
-}
+// __device__ __forceinline__ float4 ld_global_volatile(float4* addr) {
+//   float4 val;
+//   asm volatile("ld.volatile.global.v4.f32 {%0, %1, %2, %3}, [%4];"
+//                : "=f"(val.x), "=f"(val.y), "=f"(val.z), "=f"(val.w)
+//                : "l"(addr));
+//   return val;
+// }
 // __device__ __forceinline__ float4 ld_global_volatile(float4* addr) {
 //     volatile float4* vaddr = (volatile float4*)addr;
 //     return *vaddr;
 // }
 
-__device__ __forceinline__ float ld_global_volatile(float* addr) {
+__device__ __forceinline__ float4 ld_global_volatile(float4* addr) {
+    volatile float4* vaddr = (volatile float4*)addr;
+    float4 res;
+    // 分量读取，确保 volatile 语义生效于每个分量
+    res.x = vaddr->x;
+    res.y = vaddr->y;
+    res.z = vaddr->z;
+    res.w = vaddr->w;
+    return res;
+}
+
+__device__ __forceinline__ float ld_global_volatile(float *addr) {
   float val;
-  asm volatile("ld.volatile.global.f32 %0, [%1];" : "=f"(val) : "l"(addr));
+
+  // >>>> PTX2CPP Success <<<<
+  {
+    __threadfence();
+    (val) = ((volatile int *)(addr))[0];
+  }
+
   return val;
 }
+// __device__ __forceinline__ float ld_global_volatile(float* addr) {
+//   float val;
+//   asm volatile("ld.volatile.global.f32 %0, [%1];" : "=f"(val) : "l"(addr));
+//   return val;
+// }
 
 // Used by the scalar (non-float4) kernel only
 template <typename T, int NUM>

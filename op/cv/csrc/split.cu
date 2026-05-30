@@ -1,7 +1,5 @@
 #include "utils.h"
 #include "split.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 template<typename T>
 __global__ void split2images(const T* input, T* output0, T* output1, int width, int height, int input_stride, int output_stride) 
 {
@@ -70,8 +68,6 @@ __global__ void split4images(const T* input, T* output0, T* output1, T* output2,
 template<typename T>
 void Split2Op(const T* __restrict input, T* __restrict output0, T* __restrict output1, int width, int height, int input_stride, int output_stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input, output0, output1, width, height, input_stride, output_stride, stream);
-    DEBUG_DUMP_PARAMS(input, output0, output1, width, height, input_stride, output_stride, stream);
     constexpr int num_threads = 512;
     int num_elems = width * height;
     constexpr int N = 16 / sizeof(T);
@@ -82,8 +78,6 @@ void Split2Op(const T* __restrict input, T* __restrict output0, T* __restrict ou
 template<typename T>
 void Split3Op(const T* __restrict input, T* __restrict output0, T* __restrict output1, T* __restrict output2, int width, int height, int input_stride, int output_stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input, output0, output1, output2, width, height, input_stride, output_stride, stream);
-    DEBUG_DUMP_PARAMS(input, output0, output1, output2, width, height, input_stride, output_stride, stream);
     constexpr int num_threads = 512;
     int num_elems = width * height;
     constexpr int N = 16 / sizeof(T);
@@ -94,8 +88,6 @@ void Split3Op(const T* __restrict input, T* __restrict output0, T* __restrict ou
 template<typename T>
 void Split4Op(const T* __restrict input, T* __restrict output0, T* __restrict output1, T* __restrict output2, T* __restrict output3, int width, int height, int input_stride, int output_stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input, output0, output1, output2, output3, width, height, input_stride, output_stride, stream);
-    DEBUG_DUMP_PARAMS(input, output0, output1, output2, output3, width, height, input_stride, output_stride, stream);
     constexpr int num_threads = 512;
     int num_elems = width * height;
     constexpr int N = 16 / sizeof(T);

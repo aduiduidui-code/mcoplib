@@ -1,4 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
+/*
+    Copyright (c) 2025 by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
+*/
 #include <cuda_bf16.h>
 #include <torch/all.h>
 
@@ -10,8 +12,6 @@
 #include <iostream>
 #include <c10/cuda/CUDAGuard.h>
 #include "fused_mla_impl.cuh"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 // 对q做rotary_emb，对latent_cache做rms_normal，更新latent_cache和kv_a，之后对latent_cache做rotary_emb。
 // 所有的cos_sin_cache都是float.
@@ -28,8 +28,6 @@ int64_t fused_mla_RMS_rotary_emb(
     int64_t qk_rope_head_dim, //64
     int64_t qk_nope_head_dim //128
 ) {
-    DEBUG_TRACE_PARAMS(q, latent_cache, cos_sin_cache, positions, norm_weight, kv_a, q_len, num_local_heads, kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim);
-    DEBUG_DUMP_PARAMS(q, latent_cache, cos_sin_cache, positions, norm_weight, kv_a, q_len, num_local_heads, kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim);
     const at::cuda::OptionalCUDAGuard device_guard(device_of(q));
     int dev = q.get_device();
 
@@ -101,8 +99,6 @@ int64_t fused_mla_normal_kv_element_wise(
     int64_t qk_rope_head_dim, // 64
     int64_t v_head_dim // 128
 ) {
-    DEBUG_TRACE_PARAMS(kv, latent_cache, k, v, q_len, num_local_heads, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim);
-    DEBUG_DUMP_PARAMS(kv, latent_cache, k, v, q_len, num_local_heads, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim);
     const at::cuda::OptionalCUDAGuard device_guard(device_of(k));
     int dev = k.get_device();
 

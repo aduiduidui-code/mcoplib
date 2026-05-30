@@ -1,8 +1,8 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 // Adapted from
 // https://github.com/mlc-ai/xgrammar/blob/v0.1.18/python/xgrammar/kernels/apply_token_bitmask_inplace_cuda.cu
 
 /*
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,14 +24,10 @@
 #include <cuda_runtime.h>
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 
 #if !defined(USE_ROCM) && (!defined(CUDA_VERSION) || CUDA_VERSION < 12040)
 void ApplyTokenBitmaskInplace(at::Tensor logits, at::Tensor bitmask, at::optional<at::Tensor> indices = at::nullopt) {
-  DEBUG_TRACE_PARAMS(logits, bitmask, indices);
-  DEBUG_DUMP_PARAMS(logits, bitmask, indices);
   TORCH_CHECK(false, "CUDA version must be >= 12.4 for ApplyTokenBitmaskInplace");
 }
 #else
@@ -193,8 +189,6 @@ void ApplyTokenBitmaskInplaceDispatchToPackedT(
 }
 
 void ApplyTokenBitmaskInplace(at::Tensor logits, at::Tensor bitmask, at::optional<at::Tensor> indices = at::nullopt) {
-  DEBUG_TRACE_PARAMS(logits, bitmask, indices);
-  DEBUG_DUMP_PARAMS(logits, bitmask, indices);
   TORCH_CHECK(logits.is_cuda(), "logits must be a CUDA tensor.");
   TORCH_CHECK(logits.is_contiguous(), "logits must be contiguous.");
   TORCH_CHECK(logits.dim() == 1 || logits.dim() == 2, "logits must be a 1D or 2D tensor.");

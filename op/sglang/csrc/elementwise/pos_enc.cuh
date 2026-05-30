@@ -1,5 +1,6 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 /*
+ * Copyright (c) 2023 by FlashInfer team.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -369,6 +370,7 @@ cudaError_t BatchQKApplyRotaryPosIdsCosSinCacheEnhanced(
     config.blockDim = nthrs;                                          \
     config.dynamicSmemBytes = 0;                                      \
     config.stream = stream;                                           \
+                                                                      \
     FLASHINFER_CUDA_CALL(cudaLaunchKernelEx(                          \
         &config,                                                      \
         kernel_name,                                                  \

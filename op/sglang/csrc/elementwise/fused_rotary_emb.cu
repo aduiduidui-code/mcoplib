@@ -11,9 +11,6 @@
 #include <iostream>
 #include <c10/cuda/CUDAGuard.h>
 #include "fused_mla_impl.cuh"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
-
 
 int64_t fused_mla_absorb_rotary_emb(
     torch::Tensor& q, // [bs, num_local_heads, qk_nope_head_dim+qk_rope_head_dim], dtype=bf16
@@ -29,10 +26,9 @@ int64_t fused_mla_absorb_rotary_emb(
     int64_t num_local_heads, //128,
     int64_t kv_lora_rank, // 512
     int64_t qk_rope_head_dim, //64
-    int64_t qk_nope_head_dim //128
+    int64_t qk_nope_head_dim,//128
+    double eps
 ) {
-  DEBUG_TRACE_PARAMS(q, w_kc, latent_cache, cos_sin_cache, positions, norm_weight, q_input, k_input, v_input, q_len, num_local_heads, kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim);
-  DEBUG_DUMP_PARAMS(q, w_kc, latent_cache, cos_sin_cache, positions, norm_weight, q_input, k_input, v_input, q_len, num_local_heads, kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim);
     
     //TODO:
     //check all shape
@@ -89,7 +85,8 @@ int64_t fused_mla_absorb_rotary_emb(
                 (const nv_bfloat16*)(norm_weight.data_ptr<at::BFloat16>()),                                                                                                         \
                 (nv_bfloat16*)(q_input.data_ptr<at::BFloat16>()),                                                                                                                   \
                 (nv_bfloat16*)(k_input.data_ptr<at::BFloat16>()),                                                                                                                   \
-                (nv_bfloat16*)(v_input.data_ptr<at::BFloat16>())                                                                                                                    \
+                (nv_bfloat16*)(v_input.data_ptr<at::BFloat16>()),                                                                                                                   \
+                eps                                                                                                                                                                 \
             );                                                                                                                                                                      \
         }
 
@@ -129,6 +126,12 @@ int64_t fused_mla_absorb_rotary_emb(
     LAUNCH_FUSED_ABSORB_MLA(32, 512, 128, 64)
     LAUNCH_FUSED_ABSORB_MLA(64, 512, 128, 64)
     LAUNCH_FUSED_ABSORB_MLA(128, 512, 128, 64)
+
+    LAUNCH_FUSED_ABSORB_MLA(16, 512, 192, 64)
+    LAUNCH_FUSED_ABSORB_MLA(4, 512, 192, 64)
+    LAUNCH_FUSED_ABSORB_MLA(8, 512, 192, 64)
+    LAUNCH_FUSED_ABSORB_MLA(32, 512, 192, 64)
+    LAUNCH_FUSED_ABSORB_MLA(64, 512, 192, 64)
     else {
         TORCH_CHECK(false, "Parameters num_local_heads = ", num_local_heads, ", kv_lora_rank = ", kv_lora_rank,
             ", qk_nope_head_dim = ", qk_nope_head_dim, ", qk_rope_head_dim = ", qk_rope_head_dim, " do not supported!");

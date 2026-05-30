@@ -79,7 +79,8 @@ __global__ void fused_absorb_mla(
     const scalar_t* norm_weight, // [512]
     scalar_t* q_input, //[bs, 128, 576], dtype=bf16
     scalar_t* k_input, //[bs, 1, 576], dtype=bf16
-    scalar_t* v_input // [bs, 1, 512]
+    scalar_t* v_input, // [bs, 1, 512]
+    float eps = 1e-06f 
 ) {
     uint32_t bidx = blockIdx.x;
     uint32_t tid = threadIdx.x;
@@ -121,7 +122,7 @@ __global__ void fused_absorb_mla(
             uint32_t latent_cache_offset = m * latent_cache_stride;
             uint32_t v_input_offset = m * KV_LORA_RANK;
             tid =  tid % QK_ROPE_HEAD_DIM;
-            rms_norm(tid, norm_weight, latent_cache+latent_cache_offset, k_input+k_input_offset, v_input+v_input_offset);
+            rms_norm(tid, norm_weight, latent_cache+latent_cache_offset, k_input+k_input_offset, v_input+v_input_offset, eps);
             rotary_emb(
                 tid,
                 m,

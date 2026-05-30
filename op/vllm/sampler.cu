@@ -5,8 +5,6 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cub/cub.cuh>
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 namespace vllm {
 
@@ -620,8 +618,6 @@ void apply_repetition_penalties_(
     const torch::Tensor& prompt_mask,  // [num_seqs, vocab_size]
     const torch::Tensor& output_mask,  // [num_seqs, vocab_size]
     const torch::Tensor& repetition_penalties) {  // [num_seqs]
-  DEBUG_TRACE_PARAMS(logits, prompt_mask, output_mask, repetition_penalties);
-  DEBUG_DUMP_PARAMS(logits, prompt_mask, output_mask, repetition_penalties);
   TORCH_CHECK(logits.is_contiguous());
   TORCH_CHECK(prompt_mask.is_contiguous());
   TORCH_CHECK(output_mask.is_contiguous());
@@ -662,8 +658,6 @@ void top_k_per_row_decode(const torch::Tensor& logits, int64_t next_n,
                           const torch::Tensor& seqLens, torch::Tensor& indices,
                           int64_t numRows, int64_t stride0, int64_t stride1,
                           int64_t topK) {
-  DEBUG_TRACE_PARAMS(logits, next_n, seqLens, indices, numRows, stride0, stride1, topK);
-  DEBUG_DUMP_PARAMS(logits, next_n, seqLens, indices, numRows, stride0, stride1, topK);
   constexpr int kSortingAlgorithmThreshold = 12288;
   constexpr int kSplitWorkThreshold = 200 * 1000;
   constexpr int kNumThreadsPerBlock = 512;
@@ -711,7 +705,7 @@ void top_k_per_row_decode(const torch::Tensor& logits, int64_t next_n,
             static_cast<int>(next_n), seqLensIs2D,
             outLogitsAux.data_ptr<float>());
 
-    constexpr int kNumThreadsPerBlockMerge = 1024;
+    constexpr int kNumThreadsPerBlockMerge = 512;
     vllm::topKPerRowDecode<kNumThreadsPerBlockMerge, true, false, true>
         <<<numRows, kNumThreadsPerBlockMerge, topK * sizeof(int32_t), stream>>>(
             outLogitsAux.data_ptr<float>(), seqLens.data_ptr<int>(),
@@ -726,8 +720,6 @@ void top_k_per_row_prefill(const torch::Tensor& logits,
                            const torch::Tensor& rowEnds, torch::Tensor& indices,
                            int64_t numRows, int64_t stride0, int64_t stride1,
                            int64_t topK) {
-  DEBUG_TRACE_PARAMS(logits, rowStarts, rowEnds, indices, numRows, stride0, stride1, topK);
-  DEBUG_DUMP_PARAMS(logits, rowStarts, rowEnds, indices, numRows, stride0, stride1, topK);
   constexpr int kSortingAlgorithmThreshold = 12288;
   constexpr int kNumThreadsPerBlock = 512;
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();

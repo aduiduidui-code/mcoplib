@@ -1,7 +1,5 @@
 #include "utils.h"
 #include "calsum.h"
-#include "mcoplib_ops_params_info.hpp"
-#include "mcoplib_ops_params_dump.hpp"
 
 template<typename T>
 __device__ __forceinline__ T ScanWarp(T val) {
@@ -140,8 +138,6 @@ __global__ void calsum_mask_kernel(const T* __restrict input, const unsigned cha
 template<typename T, typename D>
 void CalsumOp(const T* __restrict input, const unsigned char* __restrict mask, D* __restrict dst, int width, int height, int stride, cudaStream_t stream)
 {
-    DEBUG_TRACE_PARAMS(input, mask, dst, width, height, stride, stream);
-    DEBUG_DUMP_PARAMS(input, mask, dst, width, height, stride, stream);
     constexpr int num_threads = 512;
     int64_t num_elems = (int64_t)stride * height;
     constexpr int N = 16 / sizeof(T);

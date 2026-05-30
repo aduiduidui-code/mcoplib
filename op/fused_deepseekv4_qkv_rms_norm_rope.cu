@@ -15,8 +15,8 @@ template <typename scalar_t, int VEC_SIZE = 8, int NUM_THREADS = 64>
 __global__ void fused_rms_norm_rope_kernel_metax_opt(
     scalar_t* __restrict__ q,
     scalar_t* __restrict__ kv,
-    scalar_t const* __restrict__ weight_q,   // [NEW] 新增 Q RMSNorm weight
-    scalar_t const* __restrict__ weight_kv,  // [NEW] 新增 KV RMSNorm weight
+    scalar_t const* __restrict__ weight_q,  
+    scalar_t const* __restrict__ weight_kv, 
     float2 const* __restrict__ freqs_cis, 
     int64_t const* __restrict__ positions,
     float const eps,
@@ -81,13 +81,9 @@ __global__ void fused_rms_norm_rope_kernel_metax_opt(
         k++;
     }
 
-    // =====================================================
-    // __shfl_down_sync_16 归约
-    // =====================================================
-    constexpr int sm_size = NUM_THREADS >> 4; // sm_size = 4
+    constexpr int sm_size = NUM_THREADS >> 4; 
     __shared__ float sm_sum[sm_size];
-    
-    // 16 线程组内归约
+
     #pragma unroll
     for (int i = 8; i > 0; i >>= 1) {
         ss += __shfl_down_sync_16(0xffffffffffffffff, ss, i);
@@ -135,7 +131,7 @@ __global__ void fused_rms_norm_rope_kernel_metax_opt(
     __syncthreads();
 
     // =====================================================
-    // 寄存器 Norm 与 Interleaved RoPE，最后 128-bit 写回
+    //  128-bit 写回
     // =====================================================
     k = 0;
     for (uint32_t i = tid; i < d; i += block_stride) {
@@ -155,15 +151,13 @@ __global__ void fused_rms_norm_rope_kernel_metax_opt(
             int elem_idx = i + j;
             if (elem_idx >= rope_start) {
                 int rope_idx = elem_idx - rope_start;
-                // [核心修改点]: Interleaved 布局下，实部和虚部使用同一个频率角度
                 int cos_sin_idx = rope_idx / 2; 
                 bool is_real = (rope_idx % 2 == 0); // 偶数索引是实部，奇数索引是虚部
 
                 float cos_val = smem_cos[cos_sin_idx];
                 float sin_val = smem_sin[cos_sin_idx];
 
-                // 在同一线程内部寻找 partner！
-                // 因为 VEC_SIZE=8 且 rope_start 是 8 的倍数，实部(0,2,4,6)和虚部(1,3,5,7)必处于同一个寄存器数组中！
+                // VEC_SIZE=8 且 rope_start 是 8 的倍数，实部(0,2,4,6)和虚部(1,3,5,7)必处于同一个寄存器数组中
                 int partner_j = is_real ? (j + 1) : (j - 1);
                 
                 float partner_w = cur_weight_ptr != nullptr ? static_cast<float>(weight_local[partner_j]) : 1.0f;
@@ -195,7 +189,7 @@ void fused_rms_norm_rope(
     int64_t qk_rope_head_dim,
     double eps,
     c10::optional<at::Tensor> weight_q = c10::nullopt,
-    c10::optional<at::Tensor> weight_kv = c10::nullopt) // [NEW] 增加可选参数
+    c10::optional<at::Tensor> weight_kv = c10::nullopt) 
 {
 
   TORCH_CHECK(q.is_cuda(), "q must be a CUDA tensor");
@@ -227,12 +221,11 @@ void fused_rms_norm_rope(
   kv_dim = kv.size(1); 
   int64_t kv_stride_batch = kv.stride(0);
 
-  // [NEW] 严格的对齐检验机制
   TORCH_CHECK(head_dim % 8 == 0, "head_dim must be a multiple of 8 for 128-bit vectorized processing");
   TORCH_CHECK(kv_dim % 8 == 0, "kv_dim must be a multiple of 8 for 128-bit vectorized processing");
   TORCH_CHECK(qk_rope_head_dim % 8 == 0, "qk_rope_head_dim must be a multiple of 8 to ensure safe interleaved offset");
 
-  // [NEW] Weight Shape & Type 校验
+
   if (weight_q.has_value()) {
       TORCH_CHECK(weight_q->is_cuda(), "weight_q must be a CUDA tensor");
       TORCH_CHECK(weight_q->dtype() == q.dtype(), "weight_q dtype must match q dtype");
