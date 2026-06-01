@@ -406,7 +406,7 @@ Traceback (most recent call last):
     Answer: cmake版本太高，请安装低版本，镜像中的open-ssl版本很低与高版本的cmake无法匹配，所有报错，请卸载高版本cmake，安装低版本的cmake，pip3 install cmake==3.26.3 -i  https://repo.metax-tech.com/r/pypi/simple
 
 ## Release
-### Release 0.4.4
+### Release 0.4.5
 - add cv op kernel
 - support sglang  0.5.10 op
 - optimize mcoplib project build
