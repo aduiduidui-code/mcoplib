@@ -12,7 +12,9 @@ pip3 install cmake==3.26.3
 #安装pybind11
 pip3 install pybind11 
 pip3 install build
-pip3 install setuptools-scm==8.0 
+pip3 install setuptools-scm==8.0
+#sometime need install setuptools
+pip3 install setuptools ==69.5.1
 ```
 环境变量设置：
 
