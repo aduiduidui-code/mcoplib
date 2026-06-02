@@ -373,6 +373,12 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "float? _swiglu_limit, Tensor!? weight) -> ()");
   m.impl("fused_silu_mul_dq_mask_quant_pack", torch::kCUDA,
            &fused_silu_mul_dq_mask_quant_pack);
+
+  m.def(
+      "fused_silu_mul_dq_nomask_quant_nopack(Tensor! out, Tensor! out_scale, Tensor input, "
+      "float? _swiglu_limit, Tensor!? weight) -> ()");
+  m.impl("fused_silu_mul_dq_nomask_quant_nopack", torch::kCUDA,
+           &fused_silu_mul_dq_nomask_quant_nopack);
   /*
    * From csrc/speculative
    */
