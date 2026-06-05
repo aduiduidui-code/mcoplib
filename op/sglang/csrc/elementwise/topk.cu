@@ -1,10 +1,11 @@
 /**
  * @NOTE: This file is adapted from
  * https://github.com/tile-ai/tilelang/blob/main/examples/deepseek_v32/topk_selector.py
- * We:
- * 1. adapt from tilelang to pure cuda
- * 2. optimize the performance a little
- * 3. fix the potential illegal memory access
+ * Optimizations for Metax C500:
+ * 1. Vectorized float4 loads for global memory reads
+ * 2. Fixed half bit reinterpret (reinterpret_cast, not static_cast)
+ * 3. 512 threads/block for higher SM occupancy (2 blocks/SM)
+ * 4. 16KB dynamic shared memory for s_input_idx
  */
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/TensorBody.h>
@@ -21,18 +22,17 @@
 namespace {
 
 constexpr int TopK = 2048;
-constexpr int kThreadsPerBlock = 1024;
-constexpr size_t kSmem = 8 * 1024 * sizeof(uint32_t);  // 32KB
+constexpr int kThreadsPerBlock = 512;
+constexpr size_t kSmem = 4 * 1024 * sizeof(uint32_t);  // 16KB
 
 struct FastTopKParams {
-  const float* __restrict__ input;         // [B, input_stride]
-  const int32_t* __restrict__ row_starts;  // [B]
-  int32_t* __restrict__ indices;           // [B, TopK]
-  int32_t* __restrict__ lengths;           // [B]
+  const float* __restrict__ input;
+  const int32_t* __restrict__ row_starts;
+  int32_t* __restrict__ indices;
+  int32_t* __restrict__ lengths;
   int64_t input_stride;
 };
 
-// when length <= TopK, we can directly write the indices
 __device__ void naive_topk_cuda(const float* __restrict__ score, int32_t* __restrict__ indice, int32_t length) {
   const auto tid = threadIdx.x;
   for (int i = tid; i < TopK; i += kThreadsPerBlock) {
@@ -40,7 +40,6 @@ __device__ void naive_topk_cuda(const float* __restrict__ score, int32_t* __rest
   }
 }
 
-// keep the first `length` entries, set others to -1
 __device__ void naive_topk_transform(
     const float* __restrict__ score,
     int32_t length,
@@ -52,7 +51,6 @@ __device__ void naive_topk_transform(
   }
 }
 
-// keep the first `length` entries, set others to -1
 __device__ void naive_topk_transform_ragged(
     const float* __restrict__ score, int32_t length, int32_t* __restrict__ topk_indices_ragged, int32_t offset) {
   const auto tid = threadIdx.x;
@@ -63,23 +61,22 @@ __device__ void naive_topk_transform_ragged(
 
 __device__ __forceinline__ auto convert_to_uint8(float x) -> uint8_t {
   __half h = __float2half_rn(x);
-  uint16_t bits = __half_as_ushort(h);
-  uint16_t key = (bits & 0x8000) ? static_cast<uint16_t>(~bits) : static_cast<uint16_t>(bits | 0x8000);
+  uint16_t bits = *reinterpret_cast<uint16_t*>(&h);
+  uint16_t key = (x < 0.0f) ? (~bits & 0xFFFFu) : (bits | 0x8000u);
   return static_cast<uint8_t>(key >> 8);
 }
 
 __device__ __forceinline__ auto convert_to_uint32(float x) -> uint32_t {
   uint32_t bits = __float_as_uint(x);
-  return (bits & 0x80000000u) ? ~bits : (bits | 0x80000000u);
+  return (x < 0.0f) ? (~bits) : (bits | 0x80000000u);
 }
 
 __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restrict__ index, int row_start, int length) {
-  // An optimized topk kernel copied from tilelang kernel
-  // We assume length > TopK here, or it will crash
   int topk = TopK;
-  constexpr auto BLOCK_SIZE = 1024;
+  constexpr auto BLOCK_SIZE = kThreadsPerBlock;
   constexpr auto RADIX = 256;
   constexpr auto SMEM_INPUT_SIZE = kSmem / (2 * sizeof(int));
+  constexpr int VEC_SIZE = 4;
 
   alignas(128) __shared__ int s_histogram_buf[2][RADIX + 128];
   alignas(128) __shared__ int s_counter;
@@ -87,7 +84,6 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
   alignas(128) __shared__ int s_num_input[2];
 
   auto& s_histogram = s_histogram_buf[0];
-  // allocate for two rounds
   extern __shared__ int s_input_idx[][SMEM_INPUT_SIZE];
 
   const int tx = threadIdx.x;
@@ -96,9 +92,19 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
   if (tx < RADIX + 1) s_histogram[tx] = 0;
   __syncthreads();
 
-  for (int idx = tx; idx < length; idx += BLOCK_SIZE) {
-    const auto bin = convert_to_uint8(input[idx + row_start]);
-    ::atomicAdd(&s_histogram[bin], 1);
+  const int vec_length = length / VEC_SIZE;
+  const float4* vec_input = reinterpret_cast<const float4*>(input + row_start);
+
+  for (int idx = tx; idx < vec_length; idx += BLOCK_SIZE) {
+    float4 vals = vec_input[idx];
+    ::atomicAdd(&s_histogram[convert_to_uint8(vals.x)], 1);
+    ::atomicAdd(&s_histogram[convert_to_uint8(vals.y)], 1);
+    ::atomicAdd(&s_histogram[convert_to_uint8(vals.z)], 1);
+    ::atomicAdd(&s_histogram[convert_to_uint8(vals.w)], 1);
+  }
+  const int remaining_start = vec_length * VEC_SIZE;
+  for (int idx = remaining_start + tx; idx < length; idx += BLOCK_SIZE) {
+    ::atomicAdd(&s_histogram[convert_to_uint8(input[idx + row_start])], 1);
   }
   __syncthreads();
 
@@ -131,9 +137,16 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
   topk -= s_histogram[threshold_bin + 1];
 
   if (topk == 0) {
-    for (int idx = tx; idx < length; idx += BLOCK_SIZE) {
-      const auto bin = static_cast<int>(convert_to_uint8(input[idx + row_start]));
-      if (bin > threshold_bin) {
+    for (int idx = tx; idx < vec_length; idx += BLOCK_SIZE) {
+      float4 vals = vec_input[idx];
+      const int base = idx * VEC_SIZE;
+      if (convert_to_uint8(vals.x) > threshold_bin) { const auto pos = ::atomicAdd(&s_counter, 1); index[pos] = base; }
+      if (convert_to_uint8(vals.y) > threshold_bin) { const auto pos = ::atomicAdd(&s_counter, 1); index[pos] = base + 1; }
+      if (convert_to_uint8(vals.z) > threshold_bin) { const auto pos = ::atomicAdd(&s_counter, 1); index[pos] = base + 2; }
+      if (convert_to_uint8(vals.w) > threshold_bin) { const auto pos = ::atomicAdd(&s_counter, 1); index[pos] = base + 3; }
+    }
+    for (int idx = remaining_start + tx; idx < length; idx += BLOCK_SIZE) {
+      if (convert_to_uint8(input[idx + row_start]) > threshold_bin) {
         const auto pos = ::atomicAdd(&s_counter, 1);
         index[pos] = idx;
       }
@@ -147,19 +160,41 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
     }
     __syncthreads();
 
-    for (int idx = tx; idx < length; idx += BLOCK_SIZE) {
+    for (int idx = tx; idx < vec_length; idx += BLOCK_SIZE) {
+      float4 vals = vec_input[idx];
+      const int base = idx * VEC_SIZE;
+      float fvals[VEC_SIZE] = {vals.x, vals.y, vals.z, vals.w};
+      const uint8_t bins[VEC_SIZE] = {
+        convert_to_uint8(fvals[0]), convert_to_uint8(fvals[1]),
+        convert_to_uint8(fvals[2]), convert_to_uint8(fvals[3])
+      };
+#pragma unroll
+      for (int v = 0; v < VEC_SIZE; ++v) {
+        const auto bin8 = static_cast<int>(bins[v]);
+        if (bin8 > threshold_bin) {
+          const auto pos = ::atomicAdd(&s_counter, 1);
+          index[pos] = base + v;
+        } else if (bin8 == threshold_bin) {
+          const auto pos = ::atomicAdd(&s_num_input[0], 1);
+          if (C10_LIKELY(pos < SMEM_INPUT_SIZE)) {
+            s_input_idx[0][pos] = base + v;
+            const auto sub_bin = (convert_to_uint32(fvals[v]) >> 24) & 0xFF;
+            ::atomicAdd(&s_histogram[sub_bin], 1);
+          }
+        }
+      }
+    }
+    for (int idx = remaining_start + tx; idx < length; idx += BLOCK_SIZE) {
       const auto raw_input = input[idx + row_start];
-      const auto bin = static_cast<int>(convert_to_uint8(raw_input));
-      if (bin > threshold_bin) {
+      const auto bin8 = static_cast<int>(convert_to_uint8(raw_input));
+      if (bin8 > threshold_bin) {
         const auto pos = ::atomicAdd(&s_counter, 1);
         index[pos] = idx;
-      } else if (bin == threshold_bin) {
+      } else if (bin8 == threshold_bin) {
         const auto pos = ::atomicAdd(&s_num_input[0], 1);
-        /// NOTE: (dark) fuse the histogram computation here
         if (C10_LIKELY(pos < SMEM_INPUT_SIZE)) {
           s_input_idx[0][pos] = idx;
-          const auto bin = convert_to_uint32(raw_input);
-          const auto sub_bin = (bin >> 24) & 0xFF;
+          const auto sub_bin = (convert_to_uint32(raw_input) >> 24) & 0xFF;
           ::atomicAdd(&s_histogram[sub_bin], 1);
         }
       }
@@ -173,7 +208,6 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
     __shared__ int s_last_remain;
     const auto r_idx = round % 2;
 
-    // clip here to prevent overflow
     const auto _raw_num_input = s_num_input[r_idx];
     const auto num_input = (_raw_num_input < int(SMEM_INPUT_SIZE)) ? _raw_num_input : int(SMEM_INPUT_SIZE);
 
@@ -223,10 +257,8 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
           } else {
             const auto pos = ::atomicAdd(&s_num_input[r_idx ^ 1], 1);
             if (C10_LIKELY(pos < SMEM_INPUT_SIZE)) {
-              /// NOTE: (dark) fuse the histogram computation here
               s_input_idx[r_idx ^ 1][pos] = idx;
-              const auto bin = convert_to_uint32(raw_input);
-              const auto sub_bin = (bin >> (offset - 8)) & 0xFF;
+              const auto sub_bin = (convert_to_uint32(raw_input) >> (offset - 8)) & 0xFF;
               ::atomicAdd(&s_histogram[sub_bin], 1);
             }
           }
@@ -237,7 +269,7 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
   }
 }
 
-__global__ __launch_bounds__(kThreadsPerBlock)  // topk
+__global__ __launch_bounds__(kThreadsPerBlock)
     void topk_kernel(const FastTopKParams params) {
   const auto& [input, row_starts, indices, lengths, input_stride] = params;
   const auto bid = static_cast<uint64_t>(blockIdx.x);
@@ -252,7 +284,7 @@ __global__ __launch_bounds__(kThreadsPerBlock)  // topk
   }
 }
 
-__global__ __launch_bounds__(kThreadsPerBlock)  // decode
+__global__ __launch_bounds__(kThreadsPerBlock)
     void topk_transform_decode_kernel(
         const FastTopKParams params,
         int32_t* __restrict__ dst_page_table,
@@ -271,19 +303,14 @@ __global__ __launch_bounds__(kThreadsPerBlock)  // decode
   } else {
     __shared__ int s_indices[TopK];
     fast_topk_cuda_tl(score, s_indices, row_start, length);
-    // copy src[s_indices] to dst, we manually unroll here
-    static_assert(TopK % kThreadsPerBlock == 0);
-    static_assert(TopK / kThreadsPerBlock == 2);
-    const auto idx_0 = tid;
-    const auto pos_0 = s_indices[idx_0];
-    dst_page_entry[idx_0] = src_page_entry[pos_0];
-    const auto idx_1 = tid + kThreadsPerBlock;
-    const auto pos_1 = s_indices[idx_1];
-    dst_page_entry[idx_1] = src_page_entry[pos_1];
+    for (int i = tid; i < TopK; i += kThreadsPerBlock) {
+      const auto pos = s_indices[i];
+      dst_page_entry[i] = src_page_entry[pos];
+    }
   }
 }
 
-__global__ __launch_bounds__(kThreadsPerBlock)  // prefill
+__global__ __launch_bounds__(kThreadsPerBlock)
     void topk_transform_prefill_kernel(
         const FastTopKParams params,
         int32_t* __restrict__ dst_page_table,
@@ -299,8 +326,6 @@ __global__ __launch_bounds__(kThreadsPerBlock)  // prefill
   const auto dst_page_entry = dst_page_table + bid * TopK;
   const auto score = input + bid * input_stride;
 
-  /// NOTE: prefill bs is usually small, we can just use a simple loop here
-  /// We ensure that last cu_seqlens is equal to number of blocks launched
   __shared__ const int32_t* s_src_page_entry;
   if (C10_LIKELY(prefill_bs <= kThreadsPerBlock)) {
     if (tid < prefill_bs) {
@@ -323,19 +348,14 @@ __global__ __launch_bounds__(kThreadsPerBlock)  // prefill
   } else {
     __shared__ int s_indices[TopK];
     fast_topk_cuda_tl(score, s_indices, row_start, length);
-    // copy src[s_indices] to dst, we manually unroll here
-    static_assert(TopK % kThreadsPerBlock == 0);
-    static_assert(TopK / kThreadsPerBlock == 2);
-    const auto idx_0 = tid;
-    const auto pos_0 = s_indices[idx_0];
-    dst_page_entry[idx_0] = src_page_entry[pos_0];
-    const auto idx_1 = tid + kThreadsPerBlock;
-    const auto pos_1 = s_indices[idx_1];
-    dst_page_entry[idx_1] = src_page_entry[pos_1];
+    for (int i = tid; i < TopK; i += kThreadsPerBlock) {
+      const auto pos = s_indices[i];
+      dst_page_entry[i] = src_page_entry[pos];
+    }
   }
 }
 
-__global__ __launch_bounds__(kThreadsPerBlock)  // prefill, ragged kv
+__global__ __launch_bounds__(kThreadsPerBlock)
     void topk_transform_prefill_ragged_kernel(
         const FastTopKParams params,
         int32_t* __restrict__ topk_indices_ragged,
@@ -354,15 +374,9 @@ __global__ __launch_bounds__(kThreadsPerBlock)  // prefill, ragged kv
   } else {
     __shared__ int s_indices[TopK];
     fast_topk_cuda_tl(score, s_indices, row_start, length);
-    // copy src[s_indices] to dst, we manually unroll here
-    static_assert(TopK % kThreadsPerBlock == 0);
-    static_assert(TopK / kThreadsPerBlock == 2);
-    const auto idx_0 = tid;
-    const auto pos_0 = s_indices[idx_0];
-    dst_indices_entry[idx_0] = pos_0 + offset;
-    const auto idx_1 = tid + kThreadsPerBlock;
-    const auto pos_1 = s_indices[idx_1];
-    dst_indices_entry[idx_1] = pos_1 + offset;
+    for (int i = tid; i < TopK; i += kThreadsPerBlock) {
+      dst_indices_entry[i] = s_indices[i] + offset;
+    }
   }
 }
 
@@ -453,18 +467,13 @@ void fast_topk_transform_interface(
   TORCH_CHECK(dst_page_table.size(0) == B);
   TORCH_CHECK(dst_page_table.size(1) == TopK);
   TORCH_CHECK(src_page_table.size(0) == prefill_bs);
-  TORCH_CHECK(prefill_bs <= B);  // prefill_bs should be smaller than expanded bs
+  TORCH_CHECK(prefill_bs <= B);
 
-  // launch kernel
   const auto stream = at::cuda::getCurrentCUDAStream().stream();
   const auto grid = dim3{static_cast<uint32_t>(B)};
   const auto block = dim3{kThreadsPerBlock};
   const auto src_stride = src_page_table.stride(0);
 
-  // dispatch to decode or prefill
-  // extend and draft extend: row_starts_opt is not null, invokes the prefill kernel
-  // decode: row_starts_opt is null, invokes the decode kernel
-  // target verify: row_starts_opt is null, invokes the prefill kernel
   const auto is_decode = !row_starts_opt.has_value() && prefill_bs == B;
   if (is_decode) {
     setup_kernel_smem_once<topk_transform_decode_kernel, kSmem>();
@@ -508,7 +517,6 @@ void fast_topk_transform_ragged_interface(
   TORCH_CHECK(topk_indices_ragged.size(1) == TopK);
   TORCH_CHECK(topk_indices_offset.size(0) == B);
 
-  // launch kernel
   const auto stream = at::cuda::getCurrentCUDAStream().stream();
   const auto grid = dim3{static_cast<uint32_t>(B)};
   const auto block = dim3{kThreadsPerBlock};
