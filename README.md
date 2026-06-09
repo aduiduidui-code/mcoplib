@@ -407,7 +407,7 @@ Traceback (most recent call last):
 ## Release
 ### Release 0.4.6
 - add cv op kernel
-- support sglang  0.5.11 op
+- support sglang  0.5.12 op
 - optimize mcoplib project build
 - support mxbench for auto test op kernel `s perfromance
 - support profiler tools check op kernel `s perfromance
