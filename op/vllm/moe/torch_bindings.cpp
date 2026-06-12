@@ -99,6 +99,10 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, m) {
       "Tensor)");
   m.impl("grouped_topk", torch::kCUDA, &grouped_topk);
 
+  // BF16/FP32 activation x FP32 weight -> FP32 router GEMM.
+  m.def("fp32_router_gemm(Tensor! output, Tensor mat_a, Tensor mat_b) -> ()");
+  m.impl("fp32_router_gemm", torch::kCUDA, &fp32_router_gemm);
+
   // cuBLAS bf16 x bf16 -> fp32 router GEMM (fallback for non-SM90 / batch > 16)
   m.def("router_gemm_bf16_fp32(Tensor input, Tensor weight) -> Tensor");
   m.impl("router_gemm_bf16_fp32", torch::kCUDA, &router_gemm_bf16_fp32);
