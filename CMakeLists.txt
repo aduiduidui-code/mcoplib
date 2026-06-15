@@ -377,7 +377,9 @@ if (BUILD_VLLM_SUBMODULE)
 
   if(MCOPLIB_GPU_LANG STREQUAL "CUDA")
     list(APPEND VLLM_MOE_EXT_SRC
-      "${VLLM_SRC_DIR}/moe/router_gemm.cu")
+      "${VLLM_SRC_DIR}/moe/router_gemm.cu"
+      "${VLLM_SRC_DIR}/moe/fp32_router_gemm_entry.cu"
+      "${VLLM_SRC_DIR}/moe/fp32_router_gemm.cu")
   endif()
 
   set_gencode_flags_for_srcs(
