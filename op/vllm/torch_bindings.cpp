@@ -429,6 +429,16 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "()");
   ops.impl("dynamic_per_token_scaled_fp8_quant", torch::kCUDA,
            &dynamic_per_token_scaled_fp8_quant);
+
+  // Compute per-token-group FP8 quantized tensor and scaling factor.
+  // The trailing bool args are kept for vLLM call-site compatibility.
+  ops.def(
+      "per_token_group_fp8_quant(Tensor input, Tensor! output_q, Tensor! "
+      "output_s, int group_size, float eps, float fp8_min, float fp8_max, "
+      "bool scale_ue8m0, bool dummy_is_scale_transposed, "
+      "bool dummy_is_tma_aligned) -> ()");
+  ops.impl("per_token_group_fp8_quant", torch::kCUDA,
+           &per_token_group_quant_fp8);
   // └------------------------- Not supported for Metax
   // -------------------------┘
 
