@@ -367,6 +367,9 @@ void selective_scan_fwd(const torch::Tensor& u, const torch::Tensor& delta,
 void dsv3_fused_a_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
                        torch::Tensor const& mat_b);
 
+void fp32_router_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
+                      torch::Tensor const& mat_b);
+
 // Todo:PTX2CPP，minimax_reduce_rms_kernel中有两个device函数依赖PTX
 torch::Tensor minimax_allreduce_rms(torch::Tensor const& input,
                                     torch::Tensor const& norm_weight,
