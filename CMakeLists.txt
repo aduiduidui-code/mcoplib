@@ -233,11 +233,14 @@ if (BUILD_VLLM_SUBMODULE)
     "${VLLM_SRC_DIR}/quantization/gptq/q_gemm.cu"
     "${VLLM_SRC_DIR}/quantization/compressed_tensors/int8_quant_kernels.cu"
     "${VLLM_SRC_DIR}/quantization/fp8/common.cu"
+    "${VLLM_SRC_DIR}/quantization/fp8/per_token_group_quant.cu"
     "${VLLM_SRC_DIR}/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.cu"
     "${VLLM_SRC_DIR}/quantization/fused_kernels/fused_silu_mul_block_quant.cu"
     "${VLLM_SRC_DIR}/quantization/gguf/gguf_kernel.cu"
     "${VLLM_SRC_DIR}/quantization/activation_kernels.cu"
     "${VLLM_SRC_DIR}/cuda_utils_kernels.cu"
+    "${VLLM_SRC_DIR}/moe/fp32_router_gemm_entry.cu"
+    "${VLLM_SRC_DIR}/moe/fp32_router_gemm.cu"
     "${VLLM_SRC_DIR}/torch_bindings.cpp")
 
   if(MCOPLIB_GPU_LANG STREQUAL "CUDA")
