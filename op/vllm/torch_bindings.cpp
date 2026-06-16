@@ -313,6 +313,10 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "dsv3_fused_a_gemm(Tensor! output, Tensor mat_a, Tensor mat_b) -> ()");
   // conditionally compiled so impl registration is in source file
 
+  // BF16/FP32 activation x FP32 weight -> FP32 router GEMM.
+  ops.def("fp32_router_gemm(Tensor! output, Tensor mat_a, Tensor mat_b) -> ()");
+  ops.impl("fp32_router_gemm", torch::kCUDA, &fp32_router_gemm);
+
   // Quantized GEMM for AWQ.
   ops.def(
       "awq_gemm(Tensor _in_feats, Tensor _kernel, Tensor _scaling_factors, "
@@ -429,6 +433,16 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "()");
   ops.impl("dynamic_per_token_scaled_fp8_quant", torch::kCUDA,
            &dynamic_per_token_scaled_fp8_quant);
+
+  // Compute per-token-group FP8 quantized tensor and scaling factor.
+  // The trailing bool args are kept for vLLM call-site compatibility.
+  ops.def(
+      "per_token_group_fp8_quant(Tensor input, Tensor! output_q, Tensor! "
+      "output_s, int group_size, float eps, float fp8_min, float fp8_max, "
+      "bool scale_ue8m0, bool dummy_is_scale_transposed, "
+      "bool dummy_is_tma_aligned) -> ()");
+  ops.impl("per_token_group_fp8_quant", torch::kCUDA,
+           &per_token_group_quant_fp8);
   // └------------------------- Not supported for Metax
   // -------------------------┘
 
