@@ -10,20 +10,20 @@ C500 has less atomic hd instruction, so Try to avoid using atomic on Metax C500.
 
 ### Key Specifications
 
-| Component | C500 64GB | Notes |
-|-----------|-----------|-------|
-| Compute Capability | 8.0 (sm_80) | Target in build.toml |
-| SMs | 104 |  |
-| CUDA Cores | 6,912 | 64 per SM |
-| Tensor Cores | 432 | 3rd gen, TF32 support |
-| L2 Cache | 8 MB |  |
-| L1 Cache | 32KB | 1 VL1 1BSM |
-| Shared Memory | 64KB/SM | Configurable |
-| Registers | 64K 32-bit/SM | 256 per thread max |
-| Memory Bandwidth | 1.55 TB/s | HBM2e |
-| Max Threads/SM | 2048 | 64 warps |
-| Max Threads/Block | 1024 | 32 warps |
-| Warp Size | 32 | Unchanged |
+| Component          | C500 64GB     | Notes                 |
+| ------------------ | ------------- | --------------------- |
+| Compute Capability | 8.0 (sm_80)   | Target in build.toml  |
+| SMs                | 104           |                       |
+| CUDA Cores         | 6,912         | 64 per SM             |
+| Tensor Cores       | 432           | 3rd gen, TF32 support |
+| L2 Cache           | 8 MB          |                       |
+| L1 Cache           | 32KB          | 1 VL1 1BSM            |
+| Shared Memory      | 64KB/SM       | Configurable          |
+| Registers          | 64K 32-bit/SM | 256 per thread max    |
+| Memory Bandwidth   | 1.55 TB/s     | HBM2e                 |
+| Max Threads/SM     | 2048          | 64 warps              |
+| Max Threads/Block  | 1024          | 32 warps              |
+| Warp Size          | 64            | Unchanged             |
 
 ### Key C500 Features
 
@@ -54,12 +54,33 @@ float val = input[idx];
 - 32 bytes minimum
 - 128 bytes optimal (full warp, FP32)
 - Memory-bound kernels more limited by 2.0 TB/s 
+- Rule of Thumb: Each thread must read or write at least 32 bytes (assembled into large bytes for loading). Avoid using ldg.u8 / ldg.i8. Use ldg.b32 / ldg.b64 / ldg.b128 instead.
+
+**SREG (Static Register) Caching for Memory-Bound Ops**
+For multi-pass algorithms (like finding max/min then quantizing), reading global memory twice is a bottleneck. Metax C500 has a massive 64K 32-bit register file per SM. You can cache data in physical registers to halve global memory reads.
+
+```c
+// SREG Optimization Pattern
+constexpr int N = 8; // e.g., 8 bfloat16 elements
+float reg_src[N];
+// 1. Read once using 128-bit vectorization
+*(float4*)reg_src = *(float4*)(ptr_input); 
+
+// 2. Do pass 1 (e.g., reduction for absmax) using reg_src
+// ... BlockReduce ...
+
+// 3. Do pass 2 (e.g., quantization) directly using reg_src WITHOUT re-reading global memory
+for(int i=0; i<N; i++) {
+    out[i] = float_to_int8_rn(reg_src[i] * scale);
+}
+```
 
 ### Vectorized Memory Access
 
 Same vectorization patterns work on Metax C500:
 
 **BFloat16 vectorization:**
+
 ```cuda
 const __nv_bfloat162* vec_input = reinterpret_cast<const __nv_bfloat162*>(row_input);
 
@@ -74,9 +95,9 @@ for (int i = tid; i < hidden_size / 2; i += stride) {
 **Expected Metax C500 Performance (RMSNorm):**
 
 | Implementation | A100 Time (ms) | Metax C500 Time (ms) | A100 Speedup |
-|:---|:---:|:---:|:---:|
-| Scalar loads | ~0.10 | 0.125 | 1.00x |
-| Vectorized | ~0.03 | 0.0375 | ~3x |
+| :------------- | :------------: | :------------------: | :----------: |
+| Scalar loads   |     ~0.10      |        0.125         |    1.00x     |
+| Vectorized     |     ~0.03      |        0.0375        |     ~3x      |
 
 **Bandwidth achieved:** Target 30-40% of A100's 2.0 TB/s theoretical
 
@@ -94,9 +115,11 @@ Metax  C500's 8MB L2 cache is still significant:
 ### Shared Memory Configuration
 
 Metax C500 supports configurable shared memory per SM:
+
 - 64 KB shared + 32 KB L1 (default)
 
 For attention kernels:
+
 ```cuda
 // Request max shared memory
 cudaFuncSetAttribute(
@@ -106,11 +129,43 @@ cudaFuncSetAttribute(
 );
 ```
 
+## kernel programming safety
+
+### Device Guard & Stream：保护多卡并发环境不串台，同时获取当前 PyTorch 计算流，坚决避免隐式同步（掉入 Default Stream 陷阱），确保异步流水线的畅通, 示例代码如下:
+
+```c
+const at::cuda::OptionalCUDAGuard device_guard(device_of(ql_nope));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  VLLM_DISPATCH_FLOATING_TYPES(ql_nope.scalar_type(), "concat_mla_q", [&] {
+    vllm::ConcatMLAQKernel<scalar_t, 512><<<grid_size, block_size, 0, stream>>>(
+        q_out.data_ptr<scalar_t>(), ql_nope.data_ptr<scalar_t>(),
+        q_pe.data_ptr<scalar_t>(), num_tokens, num_heads, q_out.stride(0),
+        q_out.stride(1), ql_nope.stride(0), ql_nope.stride(1), q_pe.stride(0),
+        q_pe.stride(1));
+  });
+
+```
+
 ## Warp-Level Optimizations
 
-### Shuffle Instructions
+### Sub-Warp (SIMD-16) Reduction
 
-Same warp shuffle patterns work on Metax C500:
+While the C500 has a warp size of 64, micro-architectural dispatch often executes in narrower chunks. For intensive reductions, using a 16-thread sub-warp shuffle avoids execution bubbles and sync stalls compared to a full 64-thread shuffle.
+
+```c
+// Metax C500 SIMD-16 Optimized Reduction
+float absmax_val = my_local_val;
+for(int i = 8; i > 0; i >>= 1) {
+    // 16-thread shuffle is highly optimized on C500
+    absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
+}
+// Followed by shared memory communication across 16-thread groups
+```
+
+### Standard Shuffle Instructions
+
+For general cases, standard warp shuffle patterns work:
 
 ```c
 //sample 1
@@ -147,6 +202,8 @@ __inline__ __device__ T WarpAllReduce(T val) {
 }
 ```
 
+
+
 ## Block-Level Optimizations
 
 ### Shuffle Instructions
@@ -165,17 +222,34 @@ __inline__ __device__ T BlockAllReduce(T val) {
 }
 ```
 
+## Instruction-Level & Fast Math Optimizations
 
+Metax C500 compiler (cucc) provides specialized built-in intrinsics to bypass slow ALUs (like floating-point division).
+
+- Replace Division with Reciprocal Intrinsic:
+  Division is very slow. Use __builtin_mxc_rcpf() to access the hardware SFU (Special Function Unit).
+
+```c
+// SLOW
+float scale = 127.0f / block_absmax_val;
+
+// FAST (Metax C500 Specific)
+float const tmp_scale = 127.0f * __builtin_mxc_rcpf(block_absmax_val);
+```
+
+- Precompute Constants: Use val * 0.0078740157f instead of val / 127.0f.
+
+- Hardware Rounding: Use __float2int_rn for fast round-to-nearest-even conversions.
 
 ## Occupancy Tuning
 
 ### Block Size Selection for Metax C500
 
-| Kernel Type | Threads/Block | Warps | Reasoning |
-|-------------|---------------|-------|-----------|
-| Element-wise | 512 | 8 | High occupancy |
-| Reduction | 512-1024 | 16-32 | Full reduction |
-| Attention | 512 | 8 | Balance shared mem |
+| Kernel Type  | Threads/Block | Warps | Reasoning          |
+| ------------ | ------------- | ----- | ------------------ |
+| Element-wise | 512           | 8     | High occupancy     |
+| Reduction    | 512-1024      | 16-32 | Full reduction     |
+| Attention    | 512           | 8     | Balance shared mem |
 
 ### Grid Sizing
 
@@ -186,6 +260,209 @@ For Metax C500 with 104 SMs:
 int num_blocks = (total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE;
 // Round up to multiple of 108 for full SM utilization
 num_blocks = ((num_blocks + 103) / 104) * 104;
+```
+
+## Case Study: Dynamic INT8 Quantization (SREG + SIMD-16 Opt)
+
+This is the ultimate reference implementation for memory-bound kernels on C500. It fuses max-finding and quantization into a single global memory pass.
+
+```c
+template <typename scalar_t, typename scale_type, typename VT, typename VT1, int NUM_THREADS, bool WITHMASK>
+__global__ void dynamic_scaled_int8_quant_kernel_sreg_opt(
+    scalar_t const* __restrict__ input, int8_t* __restrict__ out,
+    scale_type* scale, const int hidden_size, int num_tokens, int* mask_buffer=NULL) {
+  if constexpr(WITHMASK) {
+    __shared__ int sm_max_token;
+    if(threadIdx.x == 0) sm_max_token = mask_buffer[blockIdx.y]; 
+    __syncthreads();
+    if(blockIdx.x >= sm_max_token) return;
+  }
+  int const tid = threadIdx.x;
+  int64_t const token_idx = blockIdx.y * num_tokens + blockIdx.x;
+  float absmax_val = 0.0f;
+  float const zero = 0.0f;
+  constexpr int N = sizeof(VT) / sizeof(scalar_t);
+  float reg_src0[N];
+  scalar_t const* ptr_input = input + token_idx * hidden_size;
+  int reg_length = NUM_THREADS * N;
+  int length = min(hidden_size, reg_length);
+  int index = tid * N;
+  if(index < length) {
+    VT reg_src;
+    reg_src = *(VT*)(ptr_input + index);
+    scalar_t* ptr_reg_src = (scalar_t*)&reg_src;
+    #pragma unroll N
+    for(int i = 0; i < N; i++) {
+      reg_src0[i] = (float)ptr_reg_src[i];
+    }
+    #pragma unroll N
+    for(int i = 0; i < N; i++) {
+      float val = abs(reg_src0[i]);
+      absmax_val = max(absmax_val, val);
+    }
+  }
+
+  constexpr int sm_size = NUM_THREADS >> 4;
+  constexpr int sm_size2 = sm_size / 2;
+
+  __shared__ float sm_max[sm_size];
+  float block_absmax_val;
+  if constexpr (sm_size == 32) {
+    for(int i = 8; i > 0; i >>= 1) {
+      absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
+    }
+    int lane_id = threadIdx.x & 15;
+    int group_id = threadIdx.x >> 4;
+    if(lane_id == 0) {
+      sm_max[group_id] = absmax_val;
+    }
+    __syncthreads();
+    __shared__ float sm_max2[sm_size>>4];
+    if(threadIdx.x < sm_size) {
+      float data = sm_max[threadIdx.x];
+      for(int i = 8; i >= 1; i >>= 1) {
+        data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+      }
+      int local_group_id = threadIdx.x >> 4;
+      int local_lane_id = threadIdx.x & 15;
+      if(local_lane_id == 0) {
+        sm_max2[local_group_id] = data;
+      }
+    }
+    __syncthreads();
+    block_absmax_val = max(sm_max2[0], sm_max2[1]);
+  } else if constexpr(sm_size == 16) {
+    for(int i = 8; i > 0; i >>=1 ) {
+      absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i),absmax_val);
+    }
+    int lane_id = threadIdx.x & 15;
+    int group_id = threadIdx.x >> 4;
+    if(lane_id == 0) {
+      sm_max[group_id] = absmax_val;
+    }
+    __syncthreads();
+    if(threadIdx.x < sm_size) {
+      float data = sm_max[threadIdx.x];
+      for(int i = 8; i >= 1; i >>= 1) {
+        data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+      }
+      if(threadIdx.x == 0) {
+        sm_max[0] = data;
+      }
+    }
+    __syncthreads();
+    block_absmax_val = sm_max[0];
+  } else if constexpr(sm_size == 8) {
+    for(int i = 8; i > 0; i >>=1 ) {
+      absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i) , absmax_val);
+    }
+    int lane_id = threadIdx.x & 15;
+    int group_id = threadIdx.x >> 4;
+    if(lane_id == 0) {
+      sm_max[group_id] = absmax_val;
+    }
+    __syncthreads();
+    if(threadIdx.x < sm_size) {
+      float data = sm_max[threadIdx.x];
+      for(int i = 4; i >= 1; i >>= 1) {
+        data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+      }
+      if(threadIdx.x == 0) {
+        sm_max[0] = data;
+      }
+    }
+    __syncthreads();
+    block_absmax_val = sm_max[0];
+  } else if constexpr(sm_size == 4) {
+    for(int i = 8; i > 0; i >>=1 ) {
+      absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
+    }
+    int lane_id = threadIdx.x & 15;
+    int group_id = threadIdx.x >> 4;
+    if(lane_id == 0) {
+      sm_max[group_id] = absmax_val;
+    }
+    __syncthreads();
+    if(threadIdx.x < sm_size) {
+      float data = sm_max[threadIdx.x];
+      for(int i = 2; i >= 1; i >>= 1) {
+        data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+      }
+      if(threadIdx.x == 0) {
+        sm_max[0] = data;
+      }
+    }
+    __syncthreads();
+    block_absmax_val = sm_max[0];
+  }
+  if (tid == 0) {
+    scale[token_idx] = static_cast<scale_type>(block_absmax_val * 0.0078740157);
+  }
+  float const tmp_scale = 127.0f * __builtin_mxc_rcpf(block_absmax_val);
+  int8_t* ptr_output = out + token_idx * hidden_size;
+  if(index < length) {
+    VT1 vdst;
+    int8_t* ptr_reg = (int8_t*)&vdst;
+    #pragma unroll N
+    for(int i = 0; i < N; i++) {
+      ptr_reg[i] = float_to_int8_rn(reg_src0[i] * tmp_scale);
+    }
+    *(VT1*)(ptr_output + index) = vdst;
+  }
+}
+```
+
+## Bitone sorting between warp
+
+```c++
+//metax GPU warp 64 threads
+template<uint64_t MASK=0xffffffffffffffff>
+__device__ __forceinline__ void warpSortDescendingUpdate(float (&idx_and_weight)[2], int tid) {
+
+    //Incremental construction of bitonic sequences
+    int64_t val = *(int64_t*)idx_and_weight;
+    for (int width = 2; width < 64; width <<= 1 ) {
+        for (int step = width >> 1; step > 0; step >>=1) {
+            const bool direction = ((tid & width) == 0);
+            int64_t other_temp_val = __shfl_xor_sync(MASK, val, step);
+            int other_tid = tid ^ step;
+
+            float current_weight_bits = get_weight(val);
+            float other_weight_bits = get_weight(other_temp_val);
+            int current_index = val >> 32;
+            int other_index = other_temp_val >> 32;
+
+            bool weight_gt = other_weight_bits > current_weight_bits;
+            bool weight_eq = other_weight_bits == current_weight_bits;
+            bool index_lt = other_index < current_index;
+
+            bool other_is_big = weight_gt | (weight_eq & index_lt);
+            bool swap = (tid < other_tid) ^ (other_is_big) ^ (direction);
+
+            val = swap ? other_temp_val : val;
+        }
+    }
+    //Final merger
+    for (int step = 32; step > 0; step >>= 1) {
+        int64_t other_temp_val = __shfl_xor_sync(MASK, val, step);
+        int other_tid = tid ^ step;
+
+        float current_weight_bits = get_weight(val);
+        float other_weight_bits = get_weight(other_temp_val);
+        int current_index = val >> 32;
+        int other_index = other_temp_val >> 32;
+
+        bool weight_gt = other_weight_bits > current_weight_bits;
+        bool weight_eq = other_weight_bits == current_weight_bits;
+        bool index_lt = other_index < current_index;
+
+        bool other_is_big = weight_gt | (weight_eq & index_lt);
+        bool swap = (tid < other_tid) ^ (!other_is_big);
+        val = swap ? other_temp_val : val;
+    }
+    *(int64_t*)idx_and_weight = val;
+}
+
 ```
 
 ## Precision and Tensor Cores
@@ -222,8 +499,6 @@ backend = "cuda"
 src = ["kernel_src/your_kernel.cu"]
 cuda-capabilities = ["8.0"]  # sm_80 for Metax C500
 ```
-
-
 
 ### CUDA Compilation Flags
 
@@ -272,10 +547,10 @@ sparse_weight = to_sparse_semi_structured(dense_weight)
 
 ### Expected Performance (A100 vs C500)
 
-| Kernel | A100 (ms) | C500 (ms) | c500 Speedup |
-|--------|-----------|-----------|--------------|
-| RMSNorm [2, 1024, 2048] | ~0.08 | 0.1 | 0.8x |
-| GEGLU [2, 1024, 4096] | ~0.05 | 0.0625 | 0.8x |
+| Kernel                  | A100 (ms) | C500 (ms) | c500 Speedup |
+| ----------------------- | --------- | --------- | ------------ |
+| RMSNorm [2, 1024, 2048] | ~0.08     | 0.1       | 0.8x         |
+| GEGLU [2, 1024, 4096]   | ~0.05     | 0.0625    | 0.8x         |
 
 ### McTrace Profiling
 
@@ -286,20 +561,21 @@ sparse_weight = to_sparse_semi_structured(dense_weight)
 
 1. **Memory Access**: Even more critical due to lower bandwidth
 2. **Vectorization**: Use `__half2`, `float4`
-4. **Block Size**: 512 threads is good default
-5. **Shared Memory**: Max 64 KB/SM
-6. **Grid Size**: Multiples of 104 for full utilization
-7. **Profile**: Compare achieved vs theoretical bandwidth
+3. **Block Size**: 512 threads is good default
+4. **Shared Memory**: Max 64 KB/SM
+5. **Grid Size**: Multiples of 104 for full utilization
+6. **Profile**: Compare achieved vs theoretical bandwidth
 7. Try to avoid using atomic
-8.  avoid using `ldg.u8`/`ldg.i8`，using `ldg.b32`/`ldg.b64`
+8. avoid using `ldg.u8`/`ldg.i8`，using `ldg.b32`/`ldg.b64`
 9. Each thread must read or write at least 32 bytes (assembled into large bytes for loading).
+10. warpreduce, blokcreduce
 
 ## Working Example
 
 ```bash
 cd /workspace/cuda_optimized/{cuda op name} #{cuda op name}为给出的优化的算子名称
 # set env
-```shell
+​```shell
 DEFAULT_DIR="/opt/maca"
 USER_HOME="$HOME"
 echo "cur user home dir:$USER_HOME"
@@ -313,6 +589,7 @@ export LD_LIBRARY_PATH=${MACA_PATH}/lib:${MACA_PATH}/mxgpu_llvm/lib:${LD_LIBRARY
 export CUCC_CMAKE_ENTRY=2
 echo "MACA PATH: ${MACA_PATH} Compile Code"
 ```
+
 #build source cuda code
 cucc -std=c++17 ./cuda_op_name.cu -o cuda_op_name -lcudart #cuda_op_name.cu实际应该为算子名称.cu， -o cuda_op_name 也应该为算子名称， 比如：算子名称为softmax，那么cu文件名为：softmax.cu ，-o cuda_op_name  也应该为：-o softmax， 编译命令为：cucc -std=c++17 ./softmax.cu -o softmax -lcudart
 
@@ -323,4 +600,4 @@ cucc -std=c++17 ./cuda_op_name.cu -o cuda_op_name -lcudart #cuda_op_name.cu实�
 #其次判断测试精度是否验证通过 ， 如果不通过则优化失败，继续ReAct模型进行算子优化
 #然后是否出现优化没有达到性能目标， 如果没有达到则需要ReAct模型继续进行算子优化
 #最后直到cuda kernel算子优化达到了性能目标， 则完成任务，向openclaw 网页端输出汇总后的结果，并告知最终的代码路径
-```
+
