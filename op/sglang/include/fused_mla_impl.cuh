@@ -85,11 +85,11 @@ __global__ void fused_absorb_mla(
     uint32_t bidx = blockIdx.x;
     uint32_t tid = threadIdx.x;
 
-    if (bidx < (Q_LEN + 15)/16*2*NUM_LOCAL_HEADS) {
-        do_bmm<scalar_t, 1, 8, 4, NUM_LOCAL_HEADS, KV_LORA_RANK, QK_NOPE_HEAD_DIM, QK_ROPE_HEAD_DIM>(Q_LEN, q, w_kc, q_input, tid, bidx);
-    } else if (bidx < ((Q_LEN+3)/4 + (Q_LEN + 15)/16*2) * NUM_LOCAL_HEADS) {
+    if (bidx < (Q_LEN + 15)/16*4*NUM_LOCAL_HEADS) {
+        do_bmm<scalar_t, 1, QK_NOPE_HEAD_DIM/16, 4, NUM_LOCAL_HEADS, KV_LORA_RANK, QK_NOPE_HEAD_DIM, QK_ROPE_HEAD_DIM>(Q_LEN, q, w_kc, q_input, tid, bidx);
+    } else if (bidx < ((Q_LEN+3)/4 + (Q_LEN + 15)/16*4) * NUM_LOCAL_HEADS) {
         //do t1/t2
-        bidx -= (Q_LEN + 15)/16*2*NUM_LOCAL_HEADS;
+        bidx -= (Q_LEN + 15)/16*4*NUM_LOCAL_HEADS;
         bidx = 4*bidx;
 
         //#pragma unroll
@@ -113,7 +113,7 @@ __global__ void fused_absorb_mla(
             );
         }
     } else {
-        bidx -= ((Q_LEN+3)/4 + (Q_LEN + 15)/16*2) * NUM_LOCAL_HEADS;
+        bidx -= ((Q_LEN+3)/4 + (Q_LEN + 15)/16*4) * NUM_LOCAL_HEADS;
         bidx *= 4;
 
         uint32_t m = bidx + tid/QK_ROPE_HEAD_DIM;
