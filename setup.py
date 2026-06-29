@@ -151,7 +151,7 @@ class cmake_build_ext(build_ext):
             num_jobs = len(os.sched_getaffinity(0))
         except AttributeError:
             num_jobs = os.cpu_count()
-        nvcc_threads = 1
+        nvcc_threads = 10
         return num_jobs, nvcc_threads
 
     #
