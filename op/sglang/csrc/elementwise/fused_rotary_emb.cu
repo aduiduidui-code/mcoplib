@@ -92,7 +92,11 @@ int64_t fused_mla_absorb_rotary_emb(
 
 
 
-    // dim3 grid = dim3((q_len/4 +4)*(num_local_heads+1)-1, 1, 1);
+    // BMM part: each thread block covers 256 N values (4 waves * 64 N per wave),
+    // so the number of N-blocks per head is kv_lora_rank / 256.
+    // Previously this used kv_lora_rank / 128, which launched 2x too many BMM
+    // blocks; the extra blocks had hdx >= num_local_heads, read out-of-bounds
+    // w_kc/q and overwrote valid q_input rows with garbage/NaN.
     dim3 grid = dim3((q_len + 15)/16 * kv_lora_rank/256 * num_local_heads + (q_len+3)/4 * num_local_heads + (q_len+3)/4, 1, 1);
     dim3 block = dim3(256, 1, 1);
     const int latent_cache_stride = latent_cache.stride(0);
