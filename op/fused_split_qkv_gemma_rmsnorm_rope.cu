@@ -28,11 +28,11 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
     // 计算当前线程负责的全局 Head 任务 ID
     int heads_per_block = blockDim.x / THREADS_PER_HEAD;
     int local_head_idx = threadIdx.x / THREADS_PER_HEAD;
-    int lane_idx = threadIdx.x % THREADS_PER_HEAD; // 当前线程在所属 Head 中的相对 ID
+    int lane_idx = threadIdx.x % THREADS_PER_HEAD; 
     
     int global_task_idx = blockIdx.x * heads_per_block + local_head_idx;
 
-    // 越界保护: 最后不足一个 Block 的部分线程直接退出
+    // 越界保护
     if (global_task_idx >= total_tasks) return;
 
     // 解码当前任务 (属于哪个 Token 的哪个 Head)
@@ -41,22 +41,18 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
     int head_idx = global_task_idx % total_active_heads;
     int64_t position = positions[token_idx];
 
-    // ==========================================
-    // 1. 路由寻址 (跳过 V 的内存)
-    // ==========================================
+
     scalar_t* head_ptr;
     if (head_idx < num_heads) {
-        // 这是 Q head
+        //  Q head
         head_ptr = qkv + token_idx * qkv_stride_batch + head_idx * head_dim;
     } else {
-        // 这是 K head，物理偏移需要跨过整个 Q_size
+        //  K head，物理偏移需要跨过整个 Q_size
         int k_head_idx = head_idx - num_heads;
         head_ptr = qkv + token_idx * qkv_stride_batch + q_size + k_head_idx * head_dim;
     }
 
-    // ==========================================
-    // 2. Metax SREG: 128-bit 向量化加载与平方和
-    // ==========================================
+
     int vec_offset = lane_idx * VEC_SIZE;
     
     float reg_input[VEC_SIZE];
@@ -66,7 +62,7 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
     scalar_t local_x[VEC_SIZE];
     scalar_t local_w[VEC_SIZE];
     
-    // ldg.b128 强制 16 Byte 极致合并读取
+    // ldg.b128 强制 16 Byte 合并读取
     *(float4*)local_x = *(float4*)(head_ptr + vec_offset);
     *(float4*)local_w = *(float4*)(weight + vec_offset); 
 
@@ -79,22 +75,14 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
         ss += x * x;
     }
 
-    // ==========================================
-    // 3. SIMD-16/32 Warp 归约 (无需 Shared Memory)
-    // 利用 XOR 将结果直接广播给同 Head 的所有线程
-    // ==========================================
     #pragma unroll
     for (int mask = THREADS_PER_HEAD / 2; mask > 0; mask >>= 1) {
-        // Metax 架构下 XOR shuffle 比 down_sync 更高效，一步完成 reduce + broadcast
         ss += __shfl_xor_sync(0xffffffff, ss, mask);
     }
     
-    // Metax SFU: 使用原生 rsqrtf 硬件加速求倒数平方根
+
     float rms = rsqrtf(ss / static_cast<float>(head_dim) + eps);
 
-    // ==========================================
-    // 4. RMSNorm (Gemma Style) 寄存器操作
-    // ==========================================
     float normed[VEC_SIZE];
     #pragma unroll
     for (int i = 0; i < VEC_SIZE; i++) {
@@ -102,9 +90,7 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
         normed[i] = reg_input[i] * rms * (1.0f + reg_weight[i]);
     }
 
-    // ==========================================
-    // 5. NeoX RoPE: 使用 XOR 硬件直接互换数据
-    // ==========================================
+
     int half_d = head_dim / 2;
     int logical_idx = (vec_offset < half_d) ? vec_offset : (vec_offset - half_d);
     
@@ -116,8 +102,7 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
     *(float4*)local_cos = *(float4*)(cos_sin_cache + cos_base);
     *(float4*)local_sin = *(float4*)(cos_sin_cache + sin_base);
 
-    // 核心优化: 通过 XOR 操作，左半边线程直接从右半边线程拿到数据，反之亦然
-    // 彻底消灭共享内存和同步墙 __syncthreads() !
+
     float partner_normed[VEC_SIZE];
     int swap_mask = THREADS_PER_HEAD / 2; 
 
@@ -138,24 +123,17 @@ __global__ void fused_gemma_rmsnorm_rope_neox_opt_kernel(
         float rotated_val;
         // Neox Style: 前一半实部，后一半虚部
         if (lane_idx < swap_mask) {
-            // 我是前半部分 (实部)
             rotated_val = self_val * cos_v - partner_val * sin_v;
         } else {
-            // 我是后半部分 (虚部)
             rotated_val = partner_val * sin_v + self_val * cos_v;
         }
         out[i] = static_cast<scalar_t>(rotated_val);
     }
 
-    // ==========================================
-    // 6. In-place 写回显存 (128-bit)
-    // ==========================================
     *(float4*)(head_ptr + vec_offset) = *(float4*)out;
 }
 
-// ============================================================================
-// PyBind 调用接口
-// ============================================================================
+
 void gemma_fused_rmsnorm_rope(
     at::Tensor& qkv,
     at::Tensor const& weight,
@@ -166,7 +144,6 @@ void gemma_fused_rmsnorm_rope(
     double eps,
     at::Tensor const& cos_sin_cache) 
 {
-    // 对齐检查
     TORCH_CHECK(head_dim % 8 == 0, "head_dim must be a multiple of 8");
     TORCH_CHECK(head_dim <= 256, "head_dim > 256 requires wider warp reduction handling");
 
@@ -178,19 +155,18 @@ void gemma_fused_rmsnorm_rope(
     int32_t num_kv_heads = kv_size / head_dim;
     int64_t qkv_stride_batch = qkv.stride(0);
 
-    // 总任务数：每个 token 下的 Q和K的 head 数量之和
+    // 总任务数：每个token 下的 Q和K的 head 数量之和
     int total_tasks = num_tokens * (num_heads + num_kv_heads);
     
-    // Metax 最佳并发调度：设定 Block Size 为 512
+
     constexpr int BLOCK_THREADS = 512;
     int threads_per_head = head_dim / 8; // VEC_SIZE = 8
     int heads_per_block = BLOCK_THREADS / threads_per_head;
     
     dim3 block(BLOCK_THREADS);
-    // Grid 数量: 向上取整
+
     dim3 grid((total_tasks + heads_per_block - 1) / heads_per_block);
 
-    // 编译期展开分发，保证不同 head_dim 时循环完美 Unroll
     auto dispatch_kernel = [&](auto scalar_type_tag) {
         using scalar_t = decltype(scalar_type_tag);
         if (head_dim == 128) {  // THREADS_PER_HEAD = 16

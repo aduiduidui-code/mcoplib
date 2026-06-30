@@ -30,6 +30,7 @@
 #include "fused_moe_gate_opt.h"
 #include "../include/fused_deepseekv4_qkv_rms_norm_rope.h"
 #include "../include/fused_split_gemma_rmsnorm_rope.h"
+#include "../include/fused_split_gemma_rmsnorm_rope_no_pack.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("fused_bias_dropout", &fused_bias_dropout);
@@ -127,5 +128,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("weight_q") = py::none(),
         py::arg("weight_kv") = py::none()
     );
+	
     m.def("gemma_fused_rmsnorm_rope", &gemma_fused_rmsnorm_rope, "Gemma Fused RMSNorm and Neox RoPE Kernel");
+
+    m.def("gemma_fused_rmsnorm_rope_no_pack", &gemma_fused_rmsnorm_rope_no_pack, "Gemma Fused RMSNorm and Neox RoPE Kernel_no_pack",
+        py::arg("qkv"),
+        py::arg("q_weight"),
+        py::arg("k_weight"),
+        py::arg("positions"),
+        py::arg("q_size"),
+        py::arg("kv_size"),
+        py::arg("head_dim"),
+        py::arg("eps"),
+        py::arg("cos_sin_cache")
+    );
 }

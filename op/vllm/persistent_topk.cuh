@@ -107,7 +107,7 @@ struct RadixRowState {
 struct PersistentTopKParams {
   const float* __restrict__ input;  // [num_rows, stride]
   int32_t* __restrict__ output;     // [num_rows, top_k]
-  int32_t* __restrict__ lengths;    // [num_rows]
+  const  int32_t* __restrict__ lengths;    // [num_rows]
   RadixRowState* row_states;        // large path: per-group state
   uint32_t num_rows;
   uint32_t stride;
@@ -242,8 +242,10 @@ __device__ __noinline__ void histogram_2048_topk(
         const int elem_idx = base_idx + sub;
         uint32_t bin = 0;
         if (vec_valid) bin = reg_bins[item++];
-        const bool is_above = vec_valid && (bin > uthr);
-        const bool is_equal = vec_valid && (bin == uthr);
+       // 增加严格的物理边界校验，过滤掉 vector padding 产生的 -inf 元素
+        const bool is_valid_elem = (elem_idx < seq_len);
+        const bool is_above = is_valid_elem && (bin > uthr);
+        const bool is_equal = is_valid_elem && (bin == uthr);
 
         const uint32_t above_mask = __ballot_sync(0xffffffff, is_above);
         if (above_mask) {
@@ -302,8 +304,14 @@ __device__ __noinline__ void histogram_2048_topk(
   __syncthreads();
 
   for (int i = tx; i < num_buf0; i += kThreadsPerBlock) {
-    const uint32_t fp32 = convert_to_uint32_v2(logits[bufs[0][i]]);
-    atomicAdd(&refine[0][(fp32 >> 24) & 0xFF], 1);
+    const int idx = bufs[0][i];
+    if (__builtin_expect((unsigned)idx >= (unsigned)seq_len, 0)) continue;
+    if ((unsigned)idx < (unsigned)seq_len) {
+      const uint32_t fp32 = convert_to_uint32_v2(logits[idx]);
+      atomicAdd(&refine[0][(fp32 >> 24) & 0xFF], 1);
+    }
+    // const uint32_t fp32 = convert_to_uint32_v2(logits[bufs[0][i]]);
+    // atomicAdd(&refine[0][(fp32 >> 24) & 0xFF], 1);
   }
   __syncthreads();
 
@@ -347,11 +355,14 @@ __device__ __noinline__ void histogram_2048_topk(
     if (remaining_k == 0) {
       for (int i = tx; i < num_buffered; i += kThreadsPerBlock) {
         const int idx = bufs[src][i];
-        const uint32_t fp32 = convert_to_uint32_v2(logits[idx]);
-        if (((fp32 >> bit_offset) & 0xFF) > static_cast<uint32_t>(ref_thr)) {
-          const int pos = atomicAdd(&decode_smem[SBASE + sOUT], 1);
-          output_indices[pos] = idx;
+        if ((unsigned)idx < (unsigned)seq_len) {
+          const uint32_t fp32 = convert_to_uint32_v2(logits[idx]);
+          if (((fp32 >> bit_offset) & 0xFF) > static_cast<uint32_t>(ref_thr)) {
+            const int pos = atomicAdd(&decode_smem[SBASE + sOUT], 1);
+            output_indices[pos] = idx;
+          }
         }
+
       }
       __syncthreads();
       break;
@@ -362,11 +373,17 @@ __device__ __noinline__ void histogram_2048_topk(
     __syncthreads();
 
     for (int i = tx; i < num_buffered; i += kThreadsPerBlock) {
+
       const int idx = bufs[src][i];
+
+      // 如果是无效索引，直接跳过当前线程的后续所有操作
+      if (__builtin_expect((unsigned)idx >= (unsigned)seq_len, 0)) {
+          continue;
+      }
+
       const float logit_val = logits[idx];
       const uint32_t fp32 = convert_to_uint32_v2(logit_val);
       const int bin = (fp32 >> bit_offset) & 0xFF;
-
       if (bin > ref_thr) {
         const int pos = atomicAdd(&decode_smem[SBASE + sOUT], 1);
         output_indices[pos] = idx;
@@ -850,24 +867,6 @@ __global__ void __launch_bounds__(kThreadsPerBlock, 2)
   // RadixRowState for multi-CTA cooperative radix
   RadixRowState* state = &params.row_states[group_id];
 
-  // -- Initialize RadixRowState (only needed if large rows exist) --
-  if (params.max_seq_len > RADIX_THRESHOLD) {
-    if (cta_in_group == 0) {
-      for (uint32_t buf = 0; buf < 3; buf++) {
-        for (uint32_t i = tx; i < RADIX; i += kThreadsPerBlock) {
-          state->histogram[buf][i] = 0;
-        }
-      }
-      if (tx == 0) {
-        state->remaining_k = 0;
-        state->prefix = 0;
-        state->arrival_counter = 0;
-        state->output_counter = 0;
-      }
-    }
-    __syncthreads();
-  }
-
   int barrier_phase = 0;
   const uint32_t total_iters = (params.num_rows + num_groups - 1) / num_groups;
 
@@ -975,7 +974,7 @@ struct FilteredTopKTraits<float> {
 
 constexpr uint32_t FILTERED_TOPK_BLOCK_THREADS = 1024;
 constexpr uint32_t FILTERED_TOPK_SMEM_INPUT_SIZE =
-    16 * 1024;  // 16K indices per buffer
+    14 * 1024;  // 14K indices per buffer
 constexpr size_t FILTERED_TOPK_SMEM_DYNAMIC =
     sizeof(int) * 2 * FILTERED_TOPK_SMEM_INPUT_SIZE;  // 128KB
 

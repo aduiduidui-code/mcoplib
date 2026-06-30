@@ -43,7 +43,7 @@ CMAKE_EXECUTABLE = 'cmake' if not USE_MACA else 'cmake_maca'
 #Python 当前解释器的扩展后缀
 ext_suffix = sysconfig.get_config_var('EXT_SUFFIX') or '.so'
 name="mcoplib"
-mcoplib_version="0.4.6"
+mcoplib_version="0.4.8"
 
 
 
@@ -151,7 +151,7 @@ class cmake_build_ext(build_ext):
             num_jobs = len(os.sched_getaffinity(0))
         except AttributeError:
             num_jobs = os.cpu_count()
-        nvcc_threads = 10
+        nvcc_threads = 8
         return num_jobs, nvcc_threads
 
     #
@@ -641,7 +641,7 @@ def write_git_info_file(target_path):
                 f'Build_Maca_Version = {maca_version!r}\n'
                 f'GIT_BRANCH = {branch!r}\n'
                 f'GIT_COMMIT = {commit!r}\n'
-                f'Vllm Op Version = 0.21.0\n'
+                f'Vllm Op Version = 0.23.0\n'
                 f'SGlang Op Version  = 0.5.12\n'
             )
     os.makedirs(os.path.dirname(target_path), exist_ok=True)

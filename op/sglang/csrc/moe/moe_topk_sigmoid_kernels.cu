@@ -1,6 +1,7 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 // Adapt from https://github.com/vllm-project/vllm/blob/v0.7.3/csrc/moe/topk_softmax_kernels.cu
-/*
+// which is originally adapted from
+// https://github.com/NVIDIA/TensorRT-LLM/blob/v0.7.1/cpp/tensorrt_llm/kernels/mixtureOfExperts/moe_kernels.cu
+/* Copyright 2025 SGLang Team. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -108,8 +109,7 @@ __launch_bounds__(TPB) __global__ void moeTopK(
     const int start_expert,
     const int end_expert,
     const bool renormalize,
-    const float* correction_bias,
-    const int num_token_non_padded) {
+    const float* correction_bias) {
   using cub_kvp = cub::KeyValuePair<int, float>;
   using BlockReduce = cub::BlockReduce<cub_kvp, TPB>;
   __shared__ typename BlockReduce::TempStorage tmpStorage;
@@ -119,8 +119,6 @@ __launch_bounds__(TPB) __global__ void moeTopK(
 
   const int block_row = blockIdx.x;
 
-  // Check if this row is a padded token
-  const bool is_padded_token = num_token_non_padded >= 0 && block_row >= num_token_non_padded;
   const bool row_is_active = finished ? !finished[block_row] : true;
   const int thread_read_offset = blockIdx.x * num_experts;
   float row_sum_for_renormalize = 0;
@@ -158,9 +156,8 @@ __launch_bounds__(TPB) __global__ void moeTopK(
         val -= correction_bias[expert];
       }
       output[idx] = val;
-      // Set indices to -1 for padded tokens, otherwise use original logic
-      indices[idx] = is_padded_token ? -1 : (should_process_row ? (expert - start_expert) : num_experts);
-      assert(indices[idx] >= 0 || is_padded_token);
+      indices[idx] = should_process_row ? (expert - start_expert) : num_experts;
+      assert(indices[idx] >= 0);
       row_sum_for_renormalize += val;
     }
     __syncthreads();
@@ -200,8 +197,7 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSigmoid(
     const int start_expert,
     const int end_expert,
     const bool renormalize,
-    const float* correction_bias,
-    const int num_token_non_padded) {
+    const float* correction_bias) {
   // We begin by enforcing compile time assertions and setting up compile time constants.
   static_assert(VPT == (VPT & -VPT), "VPT must be power of 2");
   static_assert(NUM_EXPERTS == (NUM_EXPERTS & -NUM_EXPERTS), "NUM_EXPERTS must be power of 2");
@@ -246,8 +242,6 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSigmoid(
   if (thread_row >= num_rows) {
     return;
   }
-  // Check if this row is a padded token
-  const bool is_padded_token = num_token_non_padded >= 0 && thread_row >= num_token_non_padded;
   const bool row_is_active = finished ? !finished[thread_row] : true;
 
   // We finally start setting up the read pointers for each thread. First, each thread jumps to the start of the
@@ -353,8 +347,7 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSigmoid(
         max_val -= correction_bias[expert];
       }
       output[idx] = max_val;
-      // Set indices to -1 for padded tokens, otherwise use original logic
-      indices[idx] = is_padded_token ? -1 : (should_process_row ? (expert - start_expert) : NUM_EXPERTS);
+      indices[idx] = should_process_row ? (expert - start_expert) : NUM_EXPERTS;
       row_sum_for_renormalize += max_val;
     }
 
@@ -408,7 +401,6 @@ void topkGatingSigmoidLauncherHelper(
     const int end_expert,
     const bool renormalize,
     const float* correction_bias,
-    const int num_token_non_padded,
     cudaStream_t stream) {
   static constexpr std::size_t MAX_BYTES_PER_LDG = 16;
 
@@ -421,7 +413,7 @@ void topkGatingSigmoidLauncherHelper(
 
   dim3 block_dim(WARP_SIZE, WARPS_PER_TB);
   topkGatingSigmoid<T, VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG><<<num_blocks, block_dim, 0, stream>>>(
-      input, finished, output, num_rows, indices, k, start_expert, end_expert, renormalize, correction_bias, num_token_non_padded);
+      input, finished, output, num_rows, indices, k, start_expert, end_expert, renormalize, correction_bias);
 }
 
 #define LAUNCH_SIGMOID(TYPE, NUM_EXPERTS, WARPS_PER_TB)             \
@@ -436,7 +428,6 @@ void topkGatingSigmoidLauncherHelper(
       num_experts,                                                  \
       renormalize,                                                  \
       correction_bias,                                              \
-      num_token_non_padded,                                         \
       stream);
 
 template <typename T>
@@ -450,7 +441,6 @@ void topkGatingSigmoidKernelLauncher(
     const int topk,
     const bool renormalize,
     const float* correction_bias,
-    const int num_token_non_padded,
     cudaStream_t stream) {
   static constexpr int WARPS_PER_TB = 4;
   switch (num_experts) {
@@ -498,8 +488,7 @@ void topkGatingSigmoidKernelLauncher(
           0,
           num_experts,
           renormalize,
-          correction_bias,
-          num_token_non_padded);
+          correction_bias);
     }
   }
 }
@@ -509,8 +498,7 @@ void topk_sigmoid(
     torch::Tensor& topk_indices,   // [num_tokens, topk]
     torch::Tensor& gating_output,  // [num_tokens, num_experts]
     const bool renormalize,
-    const c10::optional<torch::Tensor>& correction_bias,
-    const c10::optional<torch::Tensor>& num_token_non_padded) {
+    const c10::optional<torch::Tensor>& correction_bias) {
   // Check data type
   TORCH_CHECK(
       gating_output.scalar_type() == at::ScalarType::Float || gating_output.scalar_type() == at::ScalarType::Half ||
@@ -562,22 +550,6 @@ void topk_sigmoid(
     bias_ptr = bias_tensor.data_ptr<float>();
   }
 
-  // Handle num_token_non_padded parameter
-  int num_token_non_padded_val = -1;  // -1 means not provided (no padding mask)
-  if (num_token_non_padded.has_value()) {
-    const torch::Tensor& num_token_tensor = num_token_non_padded.value();
-    TORCH_CHECK(num_token_tensor.numel() == 1, "num_token_non_padded must be a scalar tensor");
-    TORCH_CHECK(
-        num_token_tensor.scalar_type() == at::ScalarType::Int || num_token_tensor.scalar_type() == at::ScalarType::Long,
-        "num_token_non_padded must be int32 or int64");
-    // Copy to CPU to get the value
-    num_token_non_padded_val = static_cast<int>(num_token_tensor.item<int64_t>());
-    TORCH_CHECK(
-        num_token_non_padded_val >= 0 && num_token_non_padded_val <= num_tokens,
-        "num_token_non_padded must be in range [0, num_tokens], got ",
-        num_token_non_padded_val);
-  }
-
   if (dtype == at::ScalarType::Float) {
     topkGatingSigmoidKernelLauncher<float>(
         gating_output.data_ptr<float>(),
@@ -589,7 +561,6 @@ void topk_sigmoid(
         topk,
         renormalize,
         bias_ptr,
-        num_token_non_padded_val,
         stream);
   } else if (dtype == at::ScalarType::Half) {
     topkGatingSigmoidKernelLauncher<__half>(
@@ -602,7 +573,6 @@ void topk_sigmoid(
         topk,
         renormalize,
         bias_ptr,
-        num_token_non_padded_val,
         stream);
   } else if (dtype == at::ScalarType::BFloat16) {
     topkGatingSigmoidKernelLauncher<__nv_bfloat16>(
@@ -615,7 +585,6 @@ void topk_sigmoid(
         topk,
         renormalize,
         bias_ptr,
-        num_token_non_padded_val,
         stream);
   } else {
     TORCH_CHECK(false, "Unsupported gating_output dtype: ", dtype);

@@ -24,7 +24,7 @@ def fp32_router_gemm(hidden_states: torch.Tensor,
 
 
 def run_case(m: int, dtype: torch.dtype, atol: float) -> None:
-    torch.manual_seed(0)
+    torch.manual_seed(42)
 
     x = torch.randn(m, HIDDEN_DIM, dtype=dtype, device="cuda")
     w = torch.randn(NUM_EXPERTS, HIDDEN_DIM, dtype=torch.float32, device="cuda")

@@ -40,14 +40,6 @@
     AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__)
 #endif
 
-#define MOE_DISPATCH_CASE_FLOATING_TYPES(...)         \
-  AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__) \
-  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)  \
-  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
-
-#define MOE_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH(TYPE, NAME, MOE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
-
 // When using this dispatch macro, the type is 'fp8_t' not 'scalar_t'.
 // See AT_DISPATCH_FP8_CASE above.
 #define VLLM_DISPATCH_FP8_TYPES(TYPE, NAME, ...) \

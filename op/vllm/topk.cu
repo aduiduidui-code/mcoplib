@@ -20,7 +20,7 @@ void launch_persistent_topk(const torch::Tensor& logits,
   namespace P = vllm::persistent;
 
   const int64_t num_rows = logits.size(0);
-  const int64_t stride = logits.size(1);
+  const int64_t stride = logits.stride(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   static int num_sms = 0;
@@ -33,7 +33,13 @@ void launch_persistent_topk(const torch::Tensor& logits,
                            cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
   }
 
-  if (num_rows > 32 && max_smem_per_block >= 128 * 1024) {
+  if (num_rows > 32 && max_smem_per_block >= vllm::FILTERED_TOPK_SMEM_DYNAMIC + 12000) {
+    // 确保即使以后移植到更小显存的卡也能准确报错
+    TORCH_CHECK(max_smem_per_block >= (vllm::FILTERED_TOPK_SMEM_DYNAMIC + 12000),
+                "persistent_topk would oversubscribe and the FilteredTopK "
+                "fallback requires >= ", (vllm::FILTERED_TOPK_SMEM_DYNAMIC + 12000),
+                " bytes smem per block (have ", max_smem_per_block, ").");
+
     cudaError_t status =
         vllm::FilteredTopKRaggedTransform<float, int32_t, TopK>(
             logits.data_ptr<float>(), output.data_ptr<int32_t>(),
@@ -131,10 +137,10 @@ void launch_persistent_topk(const torch::Tensor& logits,
     // If the cooperative launch wouldn't fit, fall back to FilteredTopK
     // instead of deadlocking. Only relevant when needs_cooperative.
     if (needs_cooperative && total_ctas > hw_resident_cap) {
-      TORCH_CHECK(max_smem_per_block >= 128 * 1024,
+      TORCH_CHECK(max_smem_per_block >= (vllm::FILTERED_TOPK_SMEM_DYNAMIC + 12000),
                   "persistent_topk would oversubscribe and the FilteredTopK "
-                  "fallback requires >=128KB smem per block (have ",
-                  max_smem_per_block, "). total_ctas=", total_ctas,
+                  "fallback requires >= ", (vllm::FILTERED_TOPK_SMEM_DYNAMIC + 12000),
+                  " bytes smem per block (have ", max_smem_per_block, "). total_ctas=", total_ctas,
                   " > num_sms*occupancy=", hw_resident_cap, " (TopK=", TopK,
                   ", vec_size=", vec_size, ", ctas_per_group=", ctas_per_group,
                   ", smem=", smem_size, ").");
@@ -234,13 +240,14 @@ void persistent_topk(const torch::Tensor& logits, const torch::Tensor& lengths,
   TORCH_CHECK(output.dim() == 2, "output must be 2D");
 
   const int64_t num_rows = logits.size(0);
-  const int64_t stride = logits.size(1);
+  const int64_t stride = logits.stride(0);
 
   TORCH_CHECK(lengths.numel() == num_rows, "lengths size mismatch");
   TORCH_CHECK(output.size(0) == num_rows && output.size(1) == k,
               "output size mismatch");
   TORCH_CHECK(k == 512 || k == 1024 || k == 2048,
               "persistent_topk supports k=512, k=1024, or k=2048, got k=", k);
+  TORCH_CHECK(logits.stride(1) == 1, "logits strides[1] must be 1");
 
   if (k == 512) {
     launch_persistent_topk<512>(logits, lengths, output, workspace,

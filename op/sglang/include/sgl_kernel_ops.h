@@ -168,7 +168,7 @@ void rotary_embedding(
 
 int64_t fused_mla_absorb_rotary_emb(at::Tensor& q, at::Tensor& w_kc, at::Tensor& latent_cache, at::Tensor& cos_sin_cache,
                                 at::Tensor& positions, at::Tensor& norm_weight, at::Tensor& q_input, at::Tensor& k_input, at::Tensor& v_input, 
-                                int64_t q_len, int64_t num_local_heads, int64_t kv_lora_rank, int64_t qk_rope_head_dim, int64_t qk_nope_head_dim, double eps = 1e-06f);
+                                int64_t q_len, int64_t num_local_heads, int64_t kv_lora_rank, int64_t qk_rope_head_dim, int64_t qk_nope_head_dim);
 
 // void downcast_fp8(
 //     at::Tensor& k,
@@ -336,8 +336,7 @@ void topk_sigmoid(
     torch::Tensor& topk_indices,
     torch::Tensor& gating_output,
     bool renormalize,
-    const c10::optional<torch::Tensor>& correction_bias,
-    const c10::optional<torch::Tensor>& num_token_non_padded = c10::nullopt);
+    const c10::optional<torch::Tensor>& correction_bias);
 
 void moe_sum_reduce(at::Tensor& input, at::Tensor& output, double routed_scaling_factor);
 
@@ -914,14 +913,6 @@ void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
 void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
                                torch::Tensor& scales,
                                std::optional<torch::Tensor> const& azp);
-
-void fused_silu_mul_dq_mask_quant_pack(torch::Tensor& out, torch::Tensor const& input, torch::Tensor const& mask,
-                               c10::optional<double> _swiglu_limit,
-                               c10::optional<at::Tensor> weight);
-
-void fused_silu_mul_dq_nomask_quant_nopack(torch::Tensor& out, torch::Tensor& out_scale, torch::Tensor const& input,
-                               c10::optional<double> _swiglu_limit,
-                               c10::optional<at::Tensor> weight);
 /*
  * From csrc/mamba
  */

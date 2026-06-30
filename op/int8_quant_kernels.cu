@@ -4,14 +4,8 @@
 #include <cmath>
 
 #include "../kernel/dispatch_utils.h"
-
-#ifndef USE_ROCM
-  #include <cub/util_type.cuh>
-  #include <cub/cub.cuh>
-#else
-  #include <hipcub/util_type.hpp>
-  #include <hipcub/hipcub.hpp>
-#endif
+#include <cub/cub.cuh>
+#include <cub/util_type.cuh>
 
 #include "../include/int8_quant_kernel.h"
 typedef __NATIVE_VECTOR__(4, float) v4f32;
@@ -230,7 +224,33 @@ __global__ void dynamic_scaled_int8_quant_kernel_sreg_opt(
 
   __shared__ float sm_max[sm_size];
   float block_absmax_val;
-  if constexpr (sm_size == 32) {
+  if constexpr(sm_size == 64) {
+    for(int i = 8; i > 0; i >>= 1) {
+      absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
+    }
+    int lane_id = threadIdx.x & 15;
+    int group_id = threadIdx.x >> 4;
+    if(lane_id == 0) {
+      sm_max[group_id] = absmax_val;
+    }
+    __syncthreads();
+    __shared__ float sm_max2[sm_size>>4];
+    if(threadIdx.x < sm_size) {
+      float data = sm_max[threadIdx.x];
+      for(int i = 8; i >= 1; i >>= 1) {
+        data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+      }
+      int local_group_id = threadIdx.x >> 4;
+      int local_lane_id = threadIdx.x & 15;
+      if(local_lane_id == 0) {
+        sm_max2[local_group_id] = data;
+      }
+    }
+    __syncthreads();
+    block_absmax_val = max(sm_max2[0], sm_max2[1]);
+    block_absmax_val = max(block_absmax_val, sm_max2[2]);
+    block_absmax_val = max(block_absmax_val, sm_max2[3]);
+  } else if constexpr (sm_size == 32) {
     for(int i = 8; i > 0; i >>= 1) {
       absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
     }
@@ -1074,8 +1094,8 @@ __launch_bounds__(1024) __global__ void dynamic_scaled_int8_quant_mask_kernel_op
   }
 }
 
-template<typename T, typename T1, typename VT, typename VT1, int NUM_VT, int type, bool has_swiglu_limit, bool has_weight> 
-__global__ void silu_and_mul_mask_quant_pack(T* input, T* output,T1* mask, int mask_size, int64_t grid_size, int64_t num_tokens, int64_t hidden_size, int64_t out_stirde, int blockDim_x, float swiglu_limit = 0.0, T* weight = nullptr)
+template<typename T, typename T1, typename VT, typename VT1, int NUM_VT, int type, bool has_swiglu_limit, bool has_weight, int NUM_THREADS> 
+__global__ void silu_and_mul_mask_quant_pack(T* input, T* output,T1* mask, int mask_size, int64_t grid_size, int64_t num_tokens, int64_t hidden_size, int64_t out_stirde, float swiglu_limit = 0.0, T* weight = nullptr)
 {
     constexpr int N = sizeof(VT) / sizeof(T);
     int const tid = threadIdx.x;
@@ -1094,7 +1114,7 @@ __global__ void silu_and_mul_mask_quant_pack(T* input, T* output,T1* mask, int m
         }
         sm_stride[tid] = tmp;
     }
-    int stride = blockDim_x * N;
+    int stride = NUM_THREADS * N;
     __syncthreads();
     int64_t total_tokens = sm_stride[mask_size - 1] + sm_mask[mask_size - 1];
 
@@ -1144,30 +1164,99 @@ __global__ void silu_and_mul_mask_quant_pack(T* input, T* output,T1* mask, int m
         // float const block_absmax_val_maybe =
         //     BlockReduce(reduceStorage).Reduce(absmax_val, cub::Max{}, blockDim_x);
         // __shared__ float block_absmax_val;
-        __shared__ float sm_max[32];
-        __shared__ float sm_max2[2];
-        for(int i = 8; i >= 1; i >>= 1){
-          absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i) , absmax_val);
+        constexpr int sm_size = NUM_THREADS >> 4;
+        constexpr int sm_size2 = sm_size / 2;
+
+        __shared__ float sm_max[sm_size];
+        float block_absmax_val;
+        if constexpr (sm_size == 32) {
+            for(int i = 8; i > 0; i >>= 1) {
+            absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
+            }
+            int lane_id = threadIdx.x & 15;
+            int group_id = threadIdx.x >> 4;
+            if(lane_id == 0) {
+            sm_max[group_id] = absmax_val;
+            }
+            __syncthreads();
+            __shared__ float sm_max2[sm_size>>4];
+            if(threadIdx.x < sm_size) {
+            float data = sm_max[threadIdx.x];
+            for(int i = 8; i >= 1; i >>= 1) {
+                data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+            }
+            int local_group_id = threadIdx.x >> 4;
+            int local_lane_id = threadIdx.x & 15;
+            if(local_lane_id == 0) {
+                sm_max2[local_group_id] = data;
+            }
+            }
+            __syncthreads();
+            block_absmax_val = max(sm_max2[0], sm_max2[1]);
+        } else if constexpr(sm_size == 16) {
+            for(int i = 8; i > 0; i >>=1 ) {
+            absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i),absmax_val);
+            }
+            int lane_id = threadIdx.x & 15;
+            int group_id = threadIdx.x >> 4;
+            if(lane_id == 0) {
+            sm_max[group_id] = absmax_val;
+            }
+            __syncthreads();
+            if(threadIdx.x < sm_size) {
+            float data = sm_max[threadIdx.x];
+            for(int i = 8; i >= 1; i >>= 1) {
+                data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+            }
+            if(threadIdx.x == 0) {
+                sm_max[0] = data;
+            }
+            }
+            __syncthreads();
+            block_absmax_val = sm_max[0];
+        } else if constexpr(sm_size == 8) {
+            for(int i = 8; i > 0; i >>=1 ) {
+            absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i) , absmax_val);
+            }
+            int lane_id = threadIdx.x & 15;
+            int group_id = threadIdx.x >> 4;
+            if(lane_id == 0) {
+            sm_max[group_id] = absmax_val;
+            }
+            __syncthreads();
+            if(threadIdx.x < sm_size) {
+            float data = sm_max[threadIdx.x];
+            for(int i = 4; i >= 1; i >>= 1) {
+                data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+            }
+            if(threadIdx.x == 0) {
+                sm_max[0] = data;
+            }
+            }
+            __syncthreads();
+            block_absmax_val = sm_max[0];
+        } else if constexpr(sm_size == 4) {
+            for(int i = 8; i > 0; i >>=1 ) {
+            absmax_val = max(__shfl_down_sync_16(0xffffffffffffffff, absmax_val, i), absmax_val);
+            }
+            int lane_id = threadIdx.x & 15;
+            int group_id = threadIdx.x >> 4;
+            if(lane_id == 0) {
+            sm_max[group_id] = absmax_val;
+            }
+            __syncthreads();
+            if(threadIdx.x < sm_size) {
+            float data = sm_max[threadIdx.x];
+            for(int i = 2; i >= 1; i >>= 1) {
+                data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
+            }
+            if(threadIdx.x == 0) {
+                sm_max[0] = data;
+            }
+            }
+            __syncthreads();
+            block_absmax_val = sm_max[0];
         }
-        int lane_id = threadIdx.x & 15;
-        int group_id = threadIdx.x >> 4;
-        if(lane_id == 0) {
-          sm_max[group_id] = absmax_val;
-        }
-        __syncthreads();
-        if(threadIdx.x < 32) {
-          float data = sm_max[threadIdx.x];
-          for(int i = 8; i >= 1; i>>=1) {
-            data = max(__shfl_down_sync_16(0xffffffffffffffff, data, i), data);
-          }
-          int local_group_id = threadIdx.x >> 4;
-          int local_lane_id = threadIdx.x & 15;
-          if(local_lane_id == 0) {
-            sm_max2[local_group_id] = data;
-          }
-        }
-        __syncthreads();
-        float block_absmax_val = max(sm_max2[0], sm_max2[1]);
 
         int8_t* ptr_output = (int8_t*)(output + token_idx * out_stirde);
         float* ptr_scale = (float*)(ptr_output + hidden_size);
@@ -1960,6 +2049,7 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
             }
           }
         } else {
+            printf("silu_and_mul_mask_quant_pack_1mask not supported\n");
             assert(0);
         }
     } else if(mask_size == 2 && (N == 8&&(inner_hidden_size & (N - 1)) == 0 && (out_stride & (N -1)) == 0)) {
@@ -2067,6 +2157,7 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
               }
             }
           } else {
+              printf("silu_and_mul_mask_quant_pack_2mask not supported\n");
               assert(0);
           }
         } else if(sizeof(T1) == 8) {
@@ -2175,6 +2266,7 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
               }
               // silu_and_mul_mask_quant_pack_2mask<T, T1, float4, float2, float4, 4, 512, type><<<gridsize, 512,0,stream>>>(input, output, mask, gridsize, num_tokens, inner_hidden_size, out_stride);
           } else {
+              printf("silu_and_mul_mask_quant_pack_2mask not supported\n");
               assert(0);
           }
         }
@@ -2186,15 +2278,15 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
             gridsize = gridsize * 8;
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else if(inner_hidden_size <= 128 * N) {
@@ -2203,15 +2295,15 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
             // silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS);
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else if(inner_hidden_size <= 256 * N) {
@@ -2220,81 +2312,83 @@ void launch_silu_mul_quant_pack(T* input, T* output, T1* mask, int64_t num_token
             // silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS);
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, NUM_THREADS, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false, NUM_THREADS><<<gridsize, NUM_THREADS,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else if(inner_hidden_size <= base) {
             // silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize);
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, true, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 1, type, false, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else if(inner_hidden_size <= base*2) {
             // silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize);
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, true, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, true, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, false, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, false, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, true, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, true, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, false, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 2, type, false, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else if(inner_hidden_size <= base * 3) {
             // silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize);
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, true, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, true, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, false, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, false, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, true, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, true, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, false, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 3, type, false, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else if(inner_hidden_size <= base * 4) {
             // silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize);
             if(weight != nullptr) {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, true, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, true, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, false, true><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, false, true, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             } else {
               if(swiglu_limit > 0.0) {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, true, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, true, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               } else {
-                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, false, false><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, blocksize, swiglu_limit, weight);
+                silu_and_mul_mask_quant_pack<T, T1, float4, float2, 4, type, false, false, 512><<<gridsize, blocksize,0,stream>>>(input, output, mask, mask_size, gridsize, num_tokens, inner_hidden_size, out_stride, swiglu_limit, weight);
               }
             }
         } else {
+            printf("silu_and_mul_mask_quant_pack not supported\n");
             assert(0);
         }
     } else {
+        printf("silu_and_mul_mask_quant_pack not supported\n");
         assert(0);
     }
 }
@@ -2337,6 +2431,7 @@ void launch_silu_mul_quan_no_mask(T* input, int8_t* output, float* scale, int64_
             assert(0);
         }
     } else {
+        printf("silu_and_mul_quant not support\n");
         assert(0);
     }
 }
@@ -2940,9 +3035,15 @@ void fused_silu_mul_dq_mask_quant_pack(
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   int64_t out_stride = ((hidden_size/4 + 2) + 255)/ 256 * 256;
   float swiglu_limit = _swiglu_limit.has_value()?_swiglu_limit.value():0.0;
+  TORCH_CHECK(mask_size <= 1024 && mask_size >= 0, "mask_size must less than or equal 1024 and must large or equal zero");
+  TORCH_CHECK(input.element_size() == 2, "only support fp16 or bf16");
+  TORCH_CHECK((hidden_size &1) == 0, "hiddensize must can be divided by 2");
+  TORCH_CHECK(((hidden_size /2) & 7) == 0, "half hiddensize must can be diveded by 8");
+  TORCH_CHECK(mask.element_size() == 8 || mask.element_size() == 4, "mask tensor only support int/int64_t type");
+  TORCH_CHECK(hidden_size <= 32768, "hidden_size only support less than or equal 32768");
+  
   if(weight.has_value()) {
     const auto &w = weight.value();
-    TORCH_CHECK(mask_size <= 1024);
     switch(mask.element_size()) {
       case 8:
         MOE_DISPATCH_FLOATING_TYPES(input.scalar_type(), "launch_silu_mul_quant_pack", [&] {
@@ -2958,7 +3059,6 @@ void fused_silu_mul_dq_mask_quant_pack(
       return;
     }
   } else {
-    TORCH_CHECK(mask_size <= 1024);
     switch(mask.element_size()) {
       case 8:
         MOE_DISPATCH_FLOATING_TYPES(input.scalar_type(), "launch_silu_mul_quant_pack", [&] {
@@ -3003,6 +3103,7 @@ void fused_silu_mul_dq_mask_quant_fp8_pack(
       });
       break;
     default:
+      printf("fused_silu_mul_dq_mask_quant_fp8_pack not support this mask type\n");
     return;
   }
 }

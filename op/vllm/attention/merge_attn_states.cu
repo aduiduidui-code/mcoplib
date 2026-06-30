@@ -7,7 +7,7 @@
 
 #include "attention_dtypes.h"
 #include "attention_utils.cuh"
-#include "../quantization/fp8/common.cuh"
+#include "../quantization/w8a8/fp8/common.cuh"
 #include "../dispatch_utils.h"
 
 namespace vllm {

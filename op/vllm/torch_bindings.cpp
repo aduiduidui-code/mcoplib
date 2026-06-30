@@ -90,31 +90,6 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "    Tensor? output_scale=None) -> ()");
   ops.impl("merge_attn_states", torch::kCUDA, &merge_attn_states);
 
-  // dual_chunk_flash_attn
-  ops.def(
-      "convert_vertical_slash_indexes("
-      "   Tensor! block_count, Tensor! block_offset, "
-      "   Tensor! column_count, Tensor! column_index, "
-      "   Tensor q_seqlens, Tensor q_seqlens, "
-      "   Tensor vertical_indexes, Tensor slash_indexes, "
-      "   int context_size, int block_size_M, int block_size_N, "
-      "   bool causal) -> ()");
-  ops.impl("convert_vertical_slash_indexes", torch::kCUDA,
-           &convert_vertical_slash_indexes);
-
-  ops.def(
-      "convert_vertical_slash_indexes_mergehead("
-      "   Tensor! block_count, Tensor! block_offset, "
-      "   Tensor! column_count, Tensor! column_index, "
-      "   Tensor q_seqlens, Tensor q_seqlens, "
-      "   Tensor vertical_indexes, Tensor slash_indexes, "
-      "   Tensor vertical_indices_count, Tensor slash_indices_count, "
-      "   int context_size, int block_size_M, int block_size_N, "
-      "   bool causal) -> ()");
-  ops.impl("convert_vertical_slash_indexes_mergehead", torch::kCUDA,
-           &convert_vertical_slash_indexes_mergehead);
-  // └-------------------------  No Used Backend for Metax
-  // -------------------------┘
 
   // Activation ops
   // Activation function used in SwiGLU.
@@ -211,9 +186,9 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // kernel launch.
   ops.def(
       "fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert("
-      "Tensor! q, Tensor kv, Tensor! k_cache, "
+      "Tensor q_in, Tensor kv, Tensor! k_cache, "
       "Tensor slot_mapping, Tensor position_ids, Tensor cos_sin_cache, "
-      "float eps, int cache_block_size) -> ()");
+      "int q_head_padded, float eps, int cache_block_size) -> Tensor");
   ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert", torch::kCUDA,
            &fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert);
 
@@ -224,6 +199,22 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "float eps, int cache_block_size) -> ()");
   ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_insert", torch::kCUDA,
            &fused_deepseek_v4_qnorm_rope_kv_rope_insert);
+
+  ops.def(
+      "fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_fp8_insert("
+      "Tensor q, Tensor kv, Tensor! q_fp8, Tensor! k_cache, "
+      "Tensor slot_mapping, Tensor position_ids, Tensor cos_sin_cache, "
+      "Tensor fp8_scale, Tensor q_fp8_scale_inv, float eps, "
+      "int cache_block_size) -> ()");
+  ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_fp8_insert", torch::kCUDA, &fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_fp8_insert);
+    
+  ops.def(
+      "fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_bf16_insert("
+      "Tensor! q, Tensor kv, Tensor! k_cache, Tensor slot_mapping, "
+      "Tensor position_ids, Tensor cos_sin_cache, float eps, "
+      "int cache_block_size) -> ()");
+  ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_bf16_insert", torch::kCUDA,
+        &fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_bf16_insert);
            
   // Apply repetition penalties to logits in-place
   ops.def(
@@ -250,6 +241,11 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "Tensor workspace, int k, int max_seq_len) -> ()");
   ops.impl("persistent_topk", torch::kCUDA, &persistent_topk);
 
+
+  ops.def(
+     "fused_unpack(Tensor packed, int topk, int n, "
+     "Tensor(a!) topk_weights, Tensor(b!) topk_ids, Tensor(c!) scale) -> ()");
+  ops.impl("fused_unpack", torch::kCUDA, &fused_unpack);
 
   // ┌------------------------  Not supported for Metax
   // ------------------------┐ Layernorm-quant Apply Root Mean Square (RMS)
@@ -443,6 +439,24 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "bool dummy_is_tma_aligned) -> ()");
   ops.impl("per_token_group_fp8_quant", torch::kCUDA,
            &per_token_group_quant_fp8);
+
+  // Compute per-token-group 8-bit quantized tensor and UE8M0-packed,
+  // TMA-aligned scales for DeepGEMM.
+  ops.def(
+      "per_token_group_fp8_quant_packed(Tensor input, Tensor! output_q, "
+      "Tensor! output_s_packed, int group_size, float eps, float fp8_min, "
+      "float fp8_max) -> ()");
+  ops.impl("per_token_group_fp8_quant_packed", torch::kCUDA, &per_token_group_quant_8bit_packed);
+  // Compute per-token-group INT8 quantized tensor and scaling factor.
+  ops.def(
+      "per_token_group_quant_int8(Tensor input, Tensor! output_q, Tensor! "
+      "output_s, int group_size, float eps, float int8_min, float int8_max) -> "
+      "()");
+  ops.impl("per_token_group_quant_int8", torch::kCUDA,  &per_token_group_quant_int8);
+
+  ops.def("permute_cols(Tensor A, Tensor perm) -> Tensor");
+  ops.impl("permute_cols", torch::kCUDA, &permute_cols);
+
   // └------------------------- Not supported for Metax
   // -------------------------┘
 
@@ -515,7 +529,8 @@ TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _cache_ops), cache_ops) {
   // Batch swap: submit all block copies in a single driver call.
   cache_ops.def(
       "swap_blocks_batch(Tensor src_ptrs, Tensor dst_ptrs,"
-      "                  Tensor sizes) -> ()");
+      "                  Tensor sizes,"
+      "                  bool is_src_access_order_any=False) -> ()");
   cache_ops.impl("swap_blocks_batch", torch::kCPU, &swap_blocks_batch);
 
   // Reshape the key and value tensors and cache them.

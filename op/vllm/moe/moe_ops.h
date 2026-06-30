@@ -55,6 +55,9 @@ void moe_lora_align_block_size(
 
 bool moe_permute_unpermute_supported();
 
+// int64_t moe_permute_sort_workspace_size(int64_t num_expanded_rows,
+//                                         int64_t num_experts);
+
 void shuffle_rows(const torch::Tensor& input_tensor,
                   const torch::Tensor& dst2src_map,
                   torch::Tensor& output_tensor);
@@ -64,10 +67,4 @@ std::tuple<torch::Tensor, torch::Tensor> grouped_topk(
     int64_t topk, bool renormalize, double routed_scaling_factor,
     torch::Tensor const& bias, int64_t scoring_func);
 
-// BF16/FP32 activation x FP32 weight -> FP32 router GEMM (H=3072, E=256, M<=32).
-void fp32_router_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
-                      torch::Tensor const& mat_b);
 
-// cuBLAS bf16 x bf16 -> fp32 router GEMM (fallback for non-SM90 / batch > 16)
-torch::Tensor router_gemm_bf16_fp32(torch::Tensor const& input,
-                                    torch::Tensor const& weight);

@@ -114,7 +114,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.impl("rotary_embedding", torch::kCUDA, &rotary_embedding);
   m.def("fused_mla_absorb_rotary_emb(Tensor q, Tensor w_kc, Tensor latent_cache, Tensor cos_sin_cache, "
       "Tensor positions, Tensor norm_weight, Tensor! q_input, Tensor! k_input, Tensor! v_input, int q_len, int num_local_heads,"
-      "int kv_lora_rank, int qk_rope_head_dim, int qk_nope_head_dim, float eps=1e-06) -> int");
+      "int kv_lora_rank, int qk_rope_head_dim, int qk_nope_head_dim) -> int");
   m.impl("fused_mla_absorb_rotary_emb", torch::kCUDA, &fused_mla_absorb_rotary_emb);
 //   m.def(
 //       "downcast_fp8(Tensor k, Tensor v, Tensor k_out, Tensor v_out, Tensor k_scale, Tensor v_scale, Tensor loc, int "
@@ -254,7 +254,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
 
   m.def(
       "topk_sigmoid(Tensor! topk_weights, Tensor! topk_indices, Tensor gating_output, bool renormalize, Tensor? "
-      "correction_bias, Tensor? num_token_non_padded=None) -> ()");
+      "correction_bias) -> ()");
   m.impl("topk_sigmoid", torch::kCUDA, &topk_sigmoid);
 
   m.def("moe_sum_reduce(Tensor input, Tensor output, float routed_scaling_factor) -> ()");
@@ -367,18 +367,6 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "Tensor!? azp) -> ()");
   m.impl("dynamic_scaled_int8_quant", torch::kCUDA,
            &dynamic_scaled_int8_quant);
-
-  m.def(
-      "fused_silu_mul_dq_mask_quant_pack(Tensor! out, Tensor input, Tensor mask, "
-      "float? _swiglu_limit, Tensor!? weight) -> ()");
-  m.impl("fused_silu_mul_dq_mask_quant_pack", torch::kCUDA,
-           &fused_silu_mul_dq_mask_quant_pack);
-
-  m.def(
-      "fused_silu_mul_dq_nomask_quant_nopack(Tensor! out, Tensor! out_scale, Tensor input, "
-      "float? _swiglu_limit, Tensor!? weight) -> ()");
-  m.impl("fused_silu_mul_dq_nomask_quant_nopack", torch::kCUDA,
-           &fused_silu_mul_dq_nomask_quant_nopack);
   /*
    * From csrc/speculative
    */
