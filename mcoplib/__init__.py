@@ -157,13 +157,108 @@ def get_maca_version():
     file_full_path = os.path.join(maca_path, 'Version.txt')
     if not os.path.isfile(file_full_path):
         return None
-    
+
     with open(file_full_path, 'r', encoding='utf-8') as file:
         first_line = file.readline().strip()
     value = first_line.split(":")[-1]
     if "." in value:
         value = value.rsplit(".", 1)[0]
     return value
+
+
+def parse_maca_version_3tup(ver):
+    """Parse a MACA version string into a 3-tuple (major, minor, patch).
+
+    Only the first three dot-separated components are compared; any suffix
+    after the third component (e.g. ``38``, ``dev4``, ``c600u``, ``dsv4`` in
+    ``3.7.0.38.dsv4``) is ignored. Each of the first three components is
+    reduced to its leading run of digits so mixed-in letters never break
+    parsing. Missing components default to 0.
+
+    Examples:
+        ``3.7.0``          -> (3, 7, 0)
+        ``3.7.0.38``       -> (3, 7, 0)
+        ``3.7.0.38.dev4``  -> (3, 7, 0)
+        ``3.7.0.38.c600u`` -> (3, 7, 0)
+        ``3.7``            -> (3, 7, 0)
+        ``3``              -> (3, 0, 0)
+    """
+    if not ver:
+        return (0, 0, 0)
+    parts = str(ver).strip().split(".")
+    nums = []
+    for p in parts[:3]:
+        m = re.match(r"\d+", p)
+        nums.append(int(m.group(0)) if m else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
+
+
+def maca_version_lt(v1, v2):
+    """Return True when v1 is strictly less than v2 (first 3 components)."""
+    return parse_maca_version_3tup(v1) < parse_maca_version_3tup(v2)
+
+
+def get_min_compatibility_maca_version(file_path):
+    """
+    从 mcoplib/version 文件中读取 Min_Compatibility_Maca_Version 的值。
+    构建期由 setup.py 写入，运行期读取用于最小兼容版本校验。
+    """
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if "Min_Compatibility_Maca_Version" in line:
+                        match = re.search(r"Min_Compatibility_Maca_Version\s*=\s*[\"'‘’“”]?(.*)", line)
+                        if match:
+                            value = match.group(1).strip()
+                            value = re.sub(r"[\"'‘’“”]", "", value)
+                            value = value.replace(" ", "")
+                            return value if value else None
+        except Exception as e:
+            print(f"WARNING get_min_compatibility_maca_version Failed to read version file: {e} \n")
+            return None
+    else:
+        print(f"WARNING get_min_compatibility_maca_version Version file not found at: {file_path} \n")
+        return None
+    return None
+
+
+def check_maca_min_compatibility():
+    """运行期 MACA 最小兼容版本校验：低于最小版本则异常退出。
+
+    只比较前 3 位 (major.minor.patch)，兼容 3.7.0.38.dev4 / 3.7.0.38 /
+    3.7.0.38.c600u / 3.7.0.38.dsv4 等格式（第 4 位及以后后缀全部忽略）。
+    """
+    run_maca_version = get_maca_version()
+    dir_path = os.path.dirname(os.path.abspath(__file__))
+    version_file = dir_path + '/' + "version"
+    min_compat_version = get_min_compatibility_maca_version(version_file)
+
+    if min_compat_version is None:
+        # version 文件中没有最小兼容版本信息（例如旧版构建产物），跳过校验避免误伤。
+        print("WARNING Min_Compatibility_Maca_Version not found in version file, skip minimum compatibility check.\n")
+        return
+
+    if run_maca_version is None:
+        sys.stderr.write(
+            "ERROR: MACA minimum compatibility version mismatch, aborting. "
+            f"Cannot detect running MACA version; minimum required is {min_compat_version}.\n"
+        )
+        sys.exit(1)
+
+    if maca_version_lt(run_maca_version, min_compat_version):
+        sys.stderr.write(
+            "ERROR: MACA minimum compatibility version mismatch, aborting. "
+            f"Running MACA version {run_maca_version} is lower than the minimum required "
+            f"{min_compat_version} (compared by major.minor.patch).\n"
+        )
+        sys.exit(1)
+
+    print(
+        f"INFO: MACA minimum compatibility check passed: {run_maca_version} >= {min_compat_version}.\n"
+    )
 
 def mcoplib_version_check():
     run_maca_version = get_maca_version()
@@ -196,3 +291,5 @@ print("INFO Print the version information of mcoplib during compilation.\n")
 get_version()
 print("INFO Staring Check the current MACA version of the operating environment.\n")
 mcoplib_version_check()
+print("INFO Staring Check the MACA minimum compatibility version of the operating environment.\n")
+check_maca_min_compatibility()

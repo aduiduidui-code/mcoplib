@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 MCOPLIB_TARGET_DEVICE = "cuda"
 
-
+MIN_COMPATIBILITY_MACA_VERSION="3.7.0"
 MAIN_CUDA_VERSION = "12.8"
 
 def is_sccache_available() -> bool:
@@ -446,8 +446,74 @@ def get_maca_version_list():
         build = ".".join(parts[3:])
     else:
         build = (parts[3] if len(parts) > 3 else "0")
-        
+
     return [major, minor, patch, build]
+
+
+def parse_maca_version_3tup(ver: Optional[str]) -> tuple:
+    """Parse a MACA version string into a 3-tuple (major, minor, patch).
+
+    Only the first three dot-separated components are compared; anything after
+    the third component (e.g. ``38``, ``dev4``, ``c600u``, ``dsv4`` in
+    ``3.7.0.38.dsv4``) is ignored. Each of the first three components is
+    reduced to its leading run of digits so that letters mixed into a
+    component never break parsing. Missing components default to 0.
+
+    Examples:
+        ``3.7.0``            -> (3, 7, 0)
+        ``3.7.0.38``         -> (3, 7, 0)
+        ``3.7.0.38.dev4``    -> (3, 7, 0)
+        ``3.7.0.38.c600u``   -> (3, 7, 0)
+        ``3.7``              -> (3, 7, 0)
+        ``3``                -> (3, 0, 0)
+    """
+    if not ver:
+        return (0, 0, 0)
+    parts = str(ver).strip().split(".")
+    nums: List[int] = []
+    for p in parts[:3]:
+        m = re.match(r"\d+", p)
+        nums.append(int(m.group(0)) if m else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
+
+
+def maca_version_lt(v1: Optional[str], v2: Optional[str]) -> bool:
+    """Return True when v1 is strictly less than v2 (first 3 components)."""
+    return parse_maca_version_3tup(v1) < parse_maca_version_3tup(v2)
+
+
+def check_maca_min_compatibility() -> None:
+    """Abort the build if the detected MACA version is below the minimum.
+
+    Only the first three version components (major.minor.patch) are compared,
+    so build/suffix components such as ``.38.dsv4`` do not affect the result.
+    """
+    current = get_maca_version()
+    if not current:
+        if USE_MACA:
+            sys.stderr.write(
+                "ERROR: MACA minimum compatibility version mismatch, aborting. "
+                f"Cannot detect MACA version (MACA_PATH={os.getenv('MACA_PATH')}); "
+                f"minimum required is {MIN_COMPATIBILITY_MACA_VERSION}.\n"
+            )
+            sys.exit(1)
+        return
+
+    if maca_version_lt(current, MIN_COMPATIBILITY_MACA_VERSION):
+        sys.stderr.write(
+            "ERROR: MACA minimum compatibility version mismatch, aborting. "
+            f"Detected MACA version {current} is lower than the minimum required "
+            f"{MIN_COMPATIBILITY_MACA_VERSION} (compared by major.minor.patch).\n"
+        )
+        sys.exit(1)
+
+    print(
+        f"INFO: MACA minimum compatibility check passed: {current} >= "
+        f"{MIN_COMPATIBILITY_MACA_VERSION}.\n"
+    )
+
 
 def get_git_commit():
     curdir = os.path.dirname(__file__)
@@ -625,25 +691,29 @@ def get_git_branch_commit():
         return None, None
 
 def write_git_info_file(target_path):
-    git_status = add_safe_directory_if_needed(ROOT_DIR)
     maca_version = get_maca_version()
+    git_status = add_safe_directory_if_needed(ROOT_DIR)
     if not git_status:
         print(f" [warn] Git invalid or No Git on directory :{ROOT_DIR} So cannot get project git info.")
-        return None
+        branch, commit = "unknown", "unknown"
     else:
         branch, commit = get_git_branch_commit()
-        if branch == None or commit == None :
+        if branch is None or commit is None:
             print(f"[warn ] canont Get mcoplib project Git info in directory:{os.getcwd()}.")
-            return None
-        else:
-            content = (
-                f'Mcoplib_Version = {mcoplib_version!r}\n'
-                f'Build_Maca_Version = {maca_version!r}\n'
-                f'GIT_BRANCH = {branch!r}\n'
-                f'GIT_COMMIT = {commit!r}\n'
-                f'Vllm Op Version = 0.23.0\n'
-                f'SGlang Op Version  = 0.5.13\n'
-            )
+            branch, commit = "unknown", "unknown"
+
+    # The version file is always written so that runtime minimum-compatibility
+    # checks can read Min_Compatibility_Maca_Version / Build_Maca_Version even
+    # when git is unavailable at build time.
+    content = (
+        f'Mcoplib_Version = {mcoplib_version!r}\n'
+        f'Build_Maca_Version = {maca_version!r}\n'
+        f'Min_Compatibility_Maca_Version = {MIN_COMPATIBILITY_MACA_VERSION!r}\n'
+        f'GIT_BRANCH = {branch!r}\n'
+        f'GIT_COMMIT = {commit!r}\n'
+        f'Vllm Op Version = 0.23.0\n'
+        f'SGlang Op Version  = 0.5.12\n'
+    )
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     with open(target_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -686,6 +756,9 @@ if not cmdclass or "install" not in cmdclass:
     if cmdclass is None:
         cmdclass = {}
     cmdclass["install"] = custom_install
+
+# 在 setup() 调用前执行 MACA 最小兼容版本校验（编译期拦截）
+check_maca_min_compatibility()
 
 # 在 setup() 调用前执行依赖校验
 check_requirements_or_exit()
