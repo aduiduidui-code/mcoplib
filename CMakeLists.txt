@@ -563,6 +563,7 @@ if (BUILD_SGLANG_SUBMODULE)
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/pos_enc.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/topk.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/copy.cu"
+      "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/dsv4_norm_rope.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/concat_mla.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/gemm/awq_kernel.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/moe/moe_align_kernel.cu"

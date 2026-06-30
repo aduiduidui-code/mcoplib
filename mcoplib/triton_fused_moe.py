@@ -7,33 +7,62 @@ import math
 import os
 # torch.compile needs typing.List. It will fail torch.library.infer_schema
 # otherwise
+from collections import OrderedDict
 from typing import Any, Dict, List, Tuple, TypedDict, Callable, Optional, Union
 import torch
 import torch.nn.functional as F
 from mcoplib.triton_utils import tl, triton
 
-# In theory, swap_ab should benefit all SM90 GPUs.
-# However, since it has only been verified on H20 (not H100/H200),
-# it is currently enabled only on H20.
+try:
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    _support_tensor_descriptor = True
+except Exception:
+    TensorDescriptor = None  # type: ignore[assignment]
+    _support_tensor_descriptor = False
+
+_is_cuda = torch.cuda.is_available()
+_is_hip = hasattr(torch.version, "hip") and torch.version.hip is not None
+
+
+def _is_sm90_supported() -> bool:
+    """Return True when the current CUDA device is SM90 (Hopper) or newer.
+
+    Mirrors sglang.srt.utils.is_sm90_supported without pulling in the sglang
+    runtime, which is not available in the mcoplib environment.
+    """
+    if not _is_cuda:
+        return False
+    try:
+        major, minor = torch.cuda.get_device_capability()
+        return major >= 9
+    except Exception:
+        return False
+
+
+def _is_batch_invariant_mode_enabled() -> bool:
+    """Local fallback for sglang.srt.batch_invariant_ops.is_batch_invariant_mode_enabled.
+
+    The batch-invariant mode is a sglang runtime toggle that is not present in
+    mcoplib; default to False so swap_ab behaves as it did before.
+    """
+    return False
+
+
+def support_tensor_descriptor():
+    return _support_tensor_descriptor
+
+
+# swap_ab benefits SM90 GPUs (H20, H100, H200, etc.) for certain block shapes.
 @functools.lru_cache(maxsize=8)
 def should_enable_swap_ab(
     BLOCK_SIZE_M: int,
     BLOCK_SIZE_N: int,
 ) -> bool:
-    if not _is_cuda:
+    if not _is_cuda or _is_batch_invariant_mode_enabled():
         return False
 
-    @functools.lru_cache(maxsize=1)
-    def is_h20_device_and_sm90_supported():
-        device_name = get_device_name()
-        is_h20_device = (
-            device_name and "H20" in device_name and "H200" not in device_name
-        )
-        return is_h20_device and is_sm90_supported()
-
-    return (
-        is_h20_device_and_sm90_supported() and BLOCK_SIZE_M < 64 and BLOCK_SIZE_N >= 64
-    )
+    return _is_sm90_supported() and BLOCK_SIZE_M < 64 and BLOCK_SIZE_N >= 64
 
 
 @triton.jit
@@ -338,7 +367,9 @@ def sgl_fused_moe_kernel(
     filter_expert: tl.constexpr,
     swap_ab: tl.constexpr,
     FUSE_ADD_TO_OUTPUT: tl.constexpr,
+    MASK_OUTPUT: tl.constexpr,
     FUSE_SUM_ALL_REDUCE: tl.constexpr,
+    LORA_PRESERVE_BASE: tl.constexpr,
     ROUTER_TOPK: tl.constexpr,
 ):
     """
@@ -399,11 +430,9 @@ def sgl_fused_moe_kernel(
     off_experts = off_experts_i32.to(tl.int64)
 
     if filter_expert and off_experts == -1:
-        # -----------------------------------------------------------
-        # Write back zeros to the output when the expert is not
-        # in the current expert parallel rank.
-        if not FUSE_ADD_TO_OUTPUT:
-            # skip the zero-write to preserve existing values.
+        if not FUSE_ADD_TO_OUTPUT and not (FUSE_SUM_ALL_REDUCE and LORA_PRESERVE_BASE):
+            # Write zeros only when this kernel owns the full output; the experimental LoRA
+            # add path (LORA_PRESERVE_BASE) keeps the base output from the prior MoE kernel.
             write_zeros_to_output(
                 c_ptr,
                 stride_cm,
@@ -575,6 +604,16 @@ def sgl_fused_moe_kernel(
         c_mask = token_mask[:, None] & add_mask[:, None] & (offs_cn[None, :] < N)
         existing = tl.load(c_ptrs, mask=c_mask, other=0.0)
         tl.store(c_ptrs, existing + accumulator, mask=c_mask)
+    elif MASK_OUTPUT:
+        # Store a fresh output while zeroing rows whose request has no active LoRA.
+        offs_token_out = offs_token // ROUTER_TOPK
+        output_mask = tl.load(
+            add_mask_ptr + offs_token_out, mask=token_mask, other=False
+        )
+        c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
+        c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+        accumulator = tl.where(output_mask[:, None], accumulator, 0.0)
+        tl.store(c_ptrs, accumulator, mask=c_mask)
     elif FUSE_SUM_ALL_REDUCE:
         offs_token_out = offs_token // ROUTER_TOPK
         c_ptrs = (
@@ -1392,7 +1431,68 @@ def fused_moe_triton_kernel_gptq_awq(
         **kwargs,
     )
 
-                         
+
+# -----------------------------------------------------------------------------
+# TMA allocator: set once per process (avoid per-call triton.set_allocator)
+# -----------------------------------------------------------------------------
+_TMA_ALLOCATOR_SET = False
+
+
+def _set_triton_tma_allocator():
+    """TMA descriptors require a global allocator; set it once to avoid per-call overhead."""
+    global _TMA_ALLOCATOR_SET
+    if _TMA_ALLOCATOR_SET:
+        return
+
+    # TMA descriptors require a global memory allocation
+    def alloc_fn(size: int, alignment: int, stream: Optional[int]):
+        # NOTE: keep this allocation on CUDA device
+        return torch.empty(size, device="cuda", dtype=torch.int8)
+
+    triton.set_allocator(alloc_fn)
+    _TMA_ALLOCATOR_SET = True
+
+
+# --- B TensorDescriptor cache (LRU) ---
+_B_DESC_CACHE_MAX = 64
+_B_DESC_CACHE: "OrderedDict[tuple, Any]" = OrderedDict()
+
+
+def _get_b_tma_desc_cached(B: torch.Tensor, block_n: int, block_k: int):
+    """
+    Cache TensorDescriptor for constant weight B.
+    Keyed by storage ptr + shape/stride/dtype + tile shape.
+    """
+    key = (
+        int(B.data_ptr()),
+        tuple(B.shape),
+        tuple(B.stride()),
+        str(B.dtype),
+        int(block_n),
+        int(block_k),
+    )
+
+    desc = _B_DESC_CACHE.get(key, None)
+    if desc is not None:
+        _B_DESC_CACHE.move_to_end(key)
+        return desc
+
+    # Create outside lock to reduce lock hold time (ok if duplicated rarely)
+    desc = TensorDescriptor(
+        B,
+        B.shape,
+        B.stride(),
+        [1, block_n, block_k],
+    )
+
+    _B_DESC_CACHE[key] = desc
+    _B_DESC_CACHE.move_to_end(key)
+    if len(_B_DESC_CACHE) > _B_DESC_CACHE_MAX:
+        _B_DESC_CACHE.popitem(last=False)
+
+    return desc
+
+
 def sgl_invoke_fused_moe_kernel(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -1425,19 +1525,37 @@ def sgl_invoke_fused_moe_kernel(
     router_topk: int = 1,
     fuse_add_to_output: bool = False,
     add_output_mask: Optional[torch.Tensor] = None,
+    mask_output: bool = False,
+    lora_preserve_base: bool = False,
 ) -> None:
+    assert topk_weights is None or topk_weights.stride(1) == 1
+    assert sorted_token_ids.stride(0) == 1
+    assert topk_weights is not None or not mul_routed_weight
 
     if use_fp8_w8a8:
         swap_ab = should_enable_swap_ab(config["BLOCK_SIZE_M"], config["BLOCK_SIZE_N"])
     else:
         swap_ab = False
-    
+
     if fuse_sum_all_reduce:
         assert not c_sorted, "fuse_sum_all_reduce only supports c_sorted=False"
-    #assert topk_weights.stride(1) == 1
-    #assert sorted_token_ids.stride(0) == 1
-    assert topk_weights is not None or not mul_routed_weight
-    assert topk_weights is None or topk_weights.stride(1) == 1
+    if fuse_add_to_output:
+        assert (
+            not fuse_sum_all_reduce
+        ), "fuse_add_to_output and fuse_sum_all_reduce are mutually exclusive"
+        assert (
+            add_output_mask is not None
+        ), "add_output_mask required when fuse_add_to_output=True"
+    if mask_output:
+        assert (
+            not fuse_add_to_output
+        ), "mask_output and fuse_add_to_output are mutually exclusive"
+        assert (
+            not fuse_sum_all_reduce
+        ), "mask_output and fuse_sum_all_reduce are mutually exclusive"
+        assert (
+            add_output_mask is not None
+        ), "add_output_mask required when mask_output=True"
     padded_size = 0
     # if use_fp8_w8a8:
     #     assert B_scale is not None
@@ -1512,6 +1630,9 @@ def sgl_invoke_fused_moe_kernel(
         and block_shape is not None
         and block_shape[1] > 0
     ):
+        assert (
+            not fuse_sum_all_reduce
+        ), "fuse_sum_all_reduce is not supported for GPTQ/AWQ kernels"
         assert B_scale is not None and B_scale.ndim == 3
         assert B_zp is None or B_zp.ndim == 3
         assert bias is None
@@ -1555,11 +1676,8 @@ def sgl_invoke_fused_moe_kernel(
         )
     else:
         if a_use_tma or b_use_tma:
-            # TMA descriptors require a global memory allocation
-            def alloc_fn(size: int, alignment: int, stream: Optional[int]):
-                return torch.empty(size, device="cuda", dtype=torch.int8)
+            _set_triton_tma_allocator()
 
-            triton.set_allocator(alloc_fn)
         if a_use_tma:
             a_desc = TensorDescriptor(
                 A, A.shape, A.stride(), [config["BLOCK_SIZE_M"], config["BLOCK_SIZE_K"]]
@@ -1567,11 +1685,11 @@ def sgl_invoke_fused_moe_kernel(
         else:
             a_desc = None
         if b_use_tma:
-            b_desc = TensorDescriptor(
+            # B is constant weights -> cache descriptor
+            b_desc = _get_b_tma_desc_cached(
                 B,
-                B.shape,
-                B.stride(),
-                [1, config["BLOCK_SIZE_N"], config["BLOCK_SIZE_K"]],
+                config["BLOCK_SIZE_N"],
+                config["BLOCK_SIZE_K"],
             )
         else:
             b_desc = None
@@ -1622,7 +1740,9 @@ def sgl_invoke_fused_moe_kernel(
             filter_expert=filter_expert,
             swap_ab=swap_ab,
             FUSE_ADD_TO_OUTPUT=fuse_add_to_output,
+            MASK_OUTPUT=mask_output,
             FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
+            LORA_PRESERVE_BASE=lora_preserve_base,
             ROUTER_TOPK=router_topk,
             **config,
         )
