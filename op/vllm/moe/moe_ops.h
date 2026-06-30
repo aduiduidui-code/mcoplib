@@ -64,3 +64,5 @@ std::tuple<torch::Tensor, torch::Tensor> grouped_topk(
     int64_t topk, bool renormalize, double routed_scaling_factor,
     torch::Tensor const& bias, int64_t scoring_func);
 
+void fp32_router_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
+                      torch::Tensor const& mat_b);

@@ -99,6 +99,8 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, m) {
       "Tensor)");
   m.impl("grouped_topk", torch::kCUDA, &grouped_topk);
 
+  m.def("fp32_router_gemm(Tensor! output, Tensor mat_a, Tensor mat_b) -> ()");
+  m.impl("fp32_router_gemm", torch::kCUDA, &fp32_router_gemm);
 }
 
 REGISTER_EXTENSION(TORCH_EXTENSION_NAME)

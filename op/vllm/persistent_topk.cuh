@@ -107,7 +107,7 @@ struct RadixRowState {
 struct PersistentTopKParams {
   const float* __restrict__ input;  // [num_rows, stride]
   int32_t* __restrict__ output;     // [num_rows, top_k]
-  const  int32_t* __restrict__ lengths;    // [num_rows]
+  int32_t* __restrict__ lengths;    // [num_rows]
   RadixRowState* row_states;        // large path: per-group state
   uint32_t num_rows;
   uint32_t stride;

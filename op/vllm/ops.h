@@ -59,31 +59,6 @@ void merge_attn_states(
     const std::optional<int64_t> prefill_tokens_with_context,
     const std::optional<torch::Tensor>& output_scale = std::nullopt);
 
-void convert_vertical_slash_indexes(
-    torch::Tensor& block_count,      // [BATCH, N_HEADS, NUM_ROWS]
-    torch::Tensor& block_offset,     // [BATCH, N_HEADS, NUM_ROWS, NNZ_S]
-    torch::Tensor& column_count,     // [BATCH, N_HEADS, NUM_ROWS]
-    torch::Tensor& column_index,     // [BATCH, N_HEADS, NUM_ROWS, NNZ_V]
-    torch::Tensor q_seqlens,         // [BATCH, ]
-    torch::Tensor kv_seqlens,        // [BATCH, ]
-    torch::Tensor vertical_indexes,  // [BATCH, N_HEADS, NNZ_V]
-    torch::Tensor slash_indexes,     // [BATCH, N_HEADS, NNZ_S]
-    int64_t context_size, int64_t block_size_M, int64_t block_size_N,
-    bool causal);
-
-void convert_vertical_slash_indexes_mergehead(
-    torch::Tensor& block_count,            // [BATCH, N_HEADS, NUM_ROWS]
-    torch::Tensor& block_offset,           // [BATCH, N_HEADS, NUM_ROWS, NNZ_S]
-    torch::Tensor& column_count,           // [BATCH, N_HEADS, NUM_ROWS]
-    torch::Tensor& column_index,           // [BATCH, N_HEADS, NUM_ROWS, NNZ_V]
-    torch::Tensor q_seqlens,               // [BATCH, ]
-    torch::Tensor kv_seqlens,              // [BATCH, ]
-    torch::Tensor vertical_indexes,        // [BATCH, N_HEADS, NNZ_V]
-    torch::Tensor slash_indexes,           // [BATCH, N_HEADS, NNZ_S]
-    torch::Tensor vertical_indices_count,  // [N_HEADS, ]
-    torch::Tensor slash_indices_count, int64_t context_size,
-    int64_t block_size_M, int64_t block_size_N, bool causal);
-
 void rms_norm(torch::Tensor& out, torch::Tensor& input,
               std::optional<torch::Tensor> weight, double epsilon);
 
@@ -104,10 +79,11 @@ void fused_qk_norm_rope(torch::Tensor& qkv, int64_t num_heads_q,
                         torch::Tensor& k_weight, torch::Tensor& cos_sin_cache,
                         bool is_neox, torch::Tensor& position_ids);
 //Todo：该算子后续替换成int8量化
-void fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
-    torch::Tensor& q, torch::Tensor const& kv, torch::Tensor& k_cache,
+torch::Tensor fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
+    torch::Tensor const& q_in, torch::Tensor const& kv, torch::Tensor& k_cache,
     torch::Tensor const& slot_mapping, torch::Tensor const& position_ids,
-    torch::Tensor const& cos_sin_cache, double eps, int64_t cache_block_size);
+    torch::Tensor const& cos_sin_cache, int64_t q_head_padded, double eps,
+    int64_t cache_block_size);
 
 void fused_deepseek_v4_qnorm_rope_kv_rope_insert(
     torch::Tensor& q, torch::Tensor const& kv, torch::Tensor& k_cache,

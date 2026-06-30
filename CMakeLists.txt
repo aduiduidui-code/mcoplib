@@ -217,7 +217,6 @@ if (BUILD_VLLM_SUBMODULE)
     "${VLLM_SRC_DIR}/attention/paged_attention_v1.cu"
     "${VLLM_SRC_DIR}/attention/paged_attention_v2.cu"
     "${VLLM_SRC_DIR}/attention/merge_attn_states.cu"
-    "${VLLM_SRC_DIR}/attention/vertical_slash_index.cu"
     "${VLLM_SRC_DIR}/pos_encoding_kernels.cu"
     "${VLLM_SRC_DIR}/activation_kernels.cu"
     "${VLLM_SRC_DIR}/layernorm_kernels.cu"
@@ -350,7 +349,8 @@ if (BUILD_VLLM_SUBMODULE)
   --Wno-macro-redefined
   --Wno-pass-failed
   --Wno-maca-compat
-  --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>)
+  --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600
+  >)
 
   #
   # _moe_C extension
@@ -362,7 +362,9 @@ if (BUILD_VLLM_SUBMODULE)
     #"${VLLM_SRC_DIR}/moe/moe_lora_align_sum_kernels.cu"
     "${VLLM_SRC_DIR}/moe/topk_softmax_kernels.cu"
     "${VLLM_SRC_DIR}/moe/topk_softplus_sqrt_kernels.cu"
-    "${VLLM_SRC_DIR}/moe/grouped_topk_kernels.cu")
+    "${VLLM_SRC_DIR}/moe/grouped_topk_kernels.cu"
+    "${VLLM_SRC_DIR}/moe/fp32_router_gemm_entry.cu"
+    "${VLLM_SRC_DIR}/moe/fp32_router_gemm.cu")
 
   if (USE_MACA AND ENABLE_BLAS_API)
     #list(APPEND VLLM_MOE_EXT_SRC "${VLLM_SRC_DIR}/moe/moe_ops.cpp")
@@ -581,6 +583,7 @@ if (BUILD_SGLANG_SUBMODULE)
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/sgl_diffusion/elementwise/timestep_embedding.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/quantization/fp8_quantize_kernel.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/fused_layernorm_dynamic_per_token_quant_custom.cu"
+      "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/fused_layernorm_dynamic_per_group_quant.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/elementwise/fused_rotary_emb.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/moe/kimi_k2_moe_fused_gate.cu"
       "${SGLANG_KERNELS_SRCS_DIR}/csrc/moe/fused_qknorm_rope_kernel.cu"
@@ -625,7 +628,7 @@ if (BUILD_SGLANG_SUBMODULE)
       $<$<COMPILE_LANGUAGE:CUDA>:-O3 -std=c++17 -Xcompiler -fPIC -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_89,code=sm_89 -gencode=arch=compute_90,code=sm_90>
       $<$<COMPILE_LANGUAGE:CUDA>:-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -DCUTLASS_VERSIONS_GENERATED -DCUTE_USE_PACKED_TUPLE=1 -DCUTLASS_TEST_LEVEL=0 -DCUTLASS_TEST_ENABLE_CACHED_RESULTS=1 -DCUTLASS_DEBUG_TRACE_LEVEL=0 >
       $<$<COMPILE_LANGUAGE:CUDA>:--ptxas-options=-v --expt-relaxed-constexpr  -use-fast-math  -DTORCH_API_INCLUDE_EXTENSION_H >
-      $<$<COMPILE_LANGUAGE:CUDA>:-DFLASHINFER_ENABLE_BF16 -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
+      $<$<COMPILE_LANGUAGE:CUDA>:-DFLASHINFER_ENABLE_BF16 -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>
   )
 
 
@@ -654,7 +657,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
 
   target_compile_options(sgl_grouped_gemm_cuda PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
+    $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
@@ -685,7 +688,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
   #添加编译参数
   target_compile_options(sgl_moe_fused_w4a16 PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
+      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
       $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
@@ -716,7 +719,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
   #添加编译参数
   target_compile_options(sgl_grouped_gemm_mctlass_int8 PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
+      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
       $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ > 

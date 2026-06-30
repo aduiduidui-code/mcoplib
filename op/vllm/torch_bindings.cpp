@@ -90,31 +90,6 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "    Tensor? output_scale=None) -> ()");
   ops.impl("merge_attn_states", torch::kCUDA, &merge_attn_states);
 
-  // dual_chunk_flash_attn
-  ops.def(
-      "convert_vertical_slash_indexes("
-      "   Tensor! block_count, Tensor! block_offset, "
-      "   Tensor! column_count, Tensor! column_index, "
-      "   Tensor q_seqlens, Tensor q_seqlens, "
-      "   Tensor vertical_indexes, Tensor slash_indexes, "
-      "   int context_size, int block_size_M, int block_size_N, "
-      "   bool causal) -> ()");
-  ops.impl("convert_vertical_slash_indexes", torch::kCUDA,
-           &convert_vertical_slash_indexes);
-
-  ops.def(
-      "convert_vertical_slash_indexes_mergehead("
-      "   Tensor! block_count, Tensor! block_offset, "
-      "   Tensor! column_count, Tensor! column_index, "
-      "   Tensor q_seqlens, Tensor q_seqlens, "
-      "   Tensor vertical_indexes, Tensor slash_indexes, "
-      "   Tensor vertical_indices_count, Tensor slash_indices_count, "
-      "   int context_size, int block_size_M, int block_size_N, "
-      "   bool causal) -> ()");
-  ops.impl("convert_vertical_slash_indexes_mergehead", torch::kCUDA,
-           &convert_vertical_slash_indexes_mergehead);
-  // └-------------------------  No Used Backend for Metax
-  // -------------------------┘
 
   // Activation ops
   // Activation function used in SwiGLU.
@@ -211,9 +186,9 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // kernel launch.
   ops.def(
       "fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert("
-      "Tensor! q, Tensor kv, Tensor! k_cache, "
+      "Tensor q_in, Tensor kv, Tensor! k_cache, "
       "Tensor slot_mapping, Tensor position_ids, Tensor cos_sin_cache, "
-      "float eps, int cache_block_size) -> ()");
+      "int q_head_padded, float eps, int cache_block_size) -> Tensor");
   ops.impl("fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert", torch::kCUDA,
            &fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert);
 

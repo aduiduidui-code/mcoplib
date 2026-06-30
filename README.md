@@ -408,13 +408,13 @@ Traceback (most recent call last):
     Answer: cmake版本太高，请安装低版本，镜像中的open-ssl版本很低与高版本的cmake无法匹配，所有报错，请卸载高版本cmake，安装低版本的cmake，pip3 install cmake==3.26.3 -i  https://repo.metax-tech.com/r/pypi/simple
 
 ## Release
-### Release 0.4.4
+### Release 0.4.7
 - add cv op kernel
-- support sglang  0.5.11 op
+- support sglang  0.5.12 op
 - optimize mcoplib project build
 - support mxbench for auto test op kernel `s perfromance
 - support profiler tools check op kernel `s perfromance
-- support for vllm 0.21.0  op kernels
+- support for vllm 0.22.0  op kernels
 - support Project-customized op kernels
 - support k-transformer op kernels
 - support verl op kernels

@@ -93,6 +93,21 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "Tensor! scales,  float var_epsilon, Tensor? scale_ub, Tensor? residual) -> ()");
   m.impl("rms_norm_dynamic_per_token_quant_custom", torch::kCUDA, &rms_norm_dynamic_per_token_quant_custom);
 
+  m.def(
+      "rms_norm_dynamic_per_group_quant("
+      "Tensor(a!) out, "
+      "Tensor(b!) out_norm, "
+      "Tensor input, "
+      "Tensor weight, "
+      "Tensor(c!) scales, "
+      "int quant_group_size, "
+      "float variance_epsilon, "
+      "Tensor? scale_ub=None, "
+      "Tensor(d!)? residual=None"
+      ") -> ()"
+      );
+  m.impl("rms_norm_dynamic_per_group_quant", torch::kCUDA, &rms_norm_dynamic_per_group_quant);
+
   m.def("silu_and_mul(Tensor! out, Tensor input) -> ()");
   m.impl("silu_and_mul", torch::kCUDA, &silu_and_mul);
 

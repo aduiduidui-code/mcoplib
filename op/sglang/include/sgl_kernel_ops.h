@@ -144,6 +144,13 @@ void rms_norm_dynamic_per_token_quant_custom(
     double const var_epsilon,     // Variance epsilon used in norm calculation
     std::optional<at::Tensor> scale_ub, std::optional<at::Tensor> residual);
 
+void rms_norm_dynamic_per_group_quant(
+    torch::Tensor &out, torch::Tensor &out_norm, const torch::Tensor &input,
+    const torch::Tensor &weight, torch::Tensor &scales,
+    int64_t quant_group_size, double variance_epsilon,
+    const std::optional<at::Tensor> &scale_ub,
+    const std::optional<at::Tensor> &residual);
+
 void apply_rope_pos_ids_cos_sin_cache(
     at::Tensor q,
     at::Tensor k,
