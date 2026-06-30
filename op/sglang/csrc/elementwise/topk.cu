@@ -149,7 +149,6 @@ __device__ void fast_topk_cuda_tl(
 
   run_cumsum();
 
-  // 修复点：边界条件从 > / <= 改为 >= / <
   if (tx < RADIX && s_histogram[tx] >= topk && s_histogram[tx + 1] < topk) {
     s_threshold_bin_id = tx;
     s_num_input[0] = 0;
@@ -159,7 +158,6 @@ __device__ void fast_topk_cuda_tl(
   __syncthreads();
 
   if (!s_threshold_found) {
-    // 理论上在正常输入下不会发生；保守退出，避免进入未定义状态
     return;
   }
 
@@ -272,7 +270,6 @@ __device__ void fast_topk_cuda_tl(
 
     run_cumsum();
 
-    // 修复点：边界条件从 > / <= 改为 >= / <
     if (tx < RADIX && s_histogram[tx] >= topk && s_histogram[tx + 1] < topk) {
       s_threshold_bin_id = tx;
       s_num_input[r_idx ^ 1] = 0;
@@ -405,7 +402,7 @@ void topk_transform_prefill_kernel(
   if (tid == 0) {
     s_src_page_entry = nullptr;
 
-    // 单线程确定性查找，避免多线程竞争写共享指针
+    // 避免多线程竞争
     for (int64_t i = 0; i < prefill_bs; ++i) {
       if (bid >= static_cast<uint64_t>(cu_seqlens_q[i]) &&
           bid < static_cast<uint64_t>(cu_seqlens_q[i + 1])) {
@@ -593,7 +590,6 @@ void fast_topk_transform_interface(
   const auto result = cudaGetLastError();
   TORCH_CHECK(result == cudaSuccess, "topk kernel failed:", ::cudaGetErrorString(result));
 }
-
 void fast_topk_transform_ragged_interface(
     const at::Tensor& score,
     const at::Tensor& lengths,
@@ -617,7 +613,6 @@ void fast_topk_transform_ragged_interface(
   TORCH_CHECK(topk_indices_ragged.size(1) == TopK);
   TORCH_CHECK(topk_indices_offset.size(0) == B);
 
-  // launch kernel
   const auto stream = at::cuda::getCurrentCUDAStream().stream();
   const auto grid = dim3{static_cast<uint32_t>(B)};
   const auto block = dim3{kThreadsPerBlock};

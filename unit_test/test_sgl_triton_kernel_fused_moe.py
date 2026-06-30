@@ -13,7 +13,6 @@ import copy
 import argparse
 from datetime import datetime
 from typing import Any, Dict, List, Tuple, TypedDict
-import vllm_metax.patch
 from mcoplib.triton_fused_moe import sgl_invoke_fused_moe_kernel 
 # ---- parameters (DeepSeek-R1 ratios, scaled down for safety) ----
 SCALE = float(os.environ.get("DEEPSEEK_UNITTEST_SCALE", "1.0"))

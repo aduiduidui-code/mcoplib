@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #ifndef _data_types_cuh
 #define _data_types_cuh
 #include <cuda_bf16.h>
@@ -22,7 +21,8 @@ class ScalarType<half> {
   using scalar_t2 = half2;
 
   // Matrix fragments for tensor core instructions; their precise layout is
-  // documented here
+  // documented here:
+  // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#matrix-fragments-for-mma-m16n8k16-with-floating-point-type
   using FragA = Vec<half2, 4>;
   using FragB = Vec<half2, 2>;
   using FragC = Vec<float, 4>;

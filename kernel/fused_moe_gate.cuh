@@ -301,6 +301,8 @@ template<class scalar_t>
                 
         }
 
+
+
         // 对于160专家: (160+64-1)/64 = 3, 3*8 = 24
         constexpr int num_waves = (NUM_EXPERTS + WAVE_SIZE - 1) / WAVE_SIZE;
         constexpr int topks_in_block = num_waves * TOPK;
@@ -315,27 +317,7 @@ template<class scalar_t>
         }
    
         __syncthreads();
-              // 打印 max_cache 所有内容（只打印一次，避免刷屏）
-        // if (tid == 0 && (blockIdx.x == 0)) {
-        //     printf("\n========== max_cache 内容 (blockIdx.x=%d) ==========\n", blockIdx.x);
-        //     for (int i = 0; i < 64; i++) {
-        //         float weight;
-        //         int idx;
-        //         if constexpr (std::is_same_v<scalar_t, float>) {
-        //             weight = scalar2float<scalar_t>(max_cache[i][0]);
-        //             idx = *((int32_t*)&max_cache[i][1]);
-        //         } else {
-        //             float temp = ((float*)(max_cache))[i];
-        //             weight = scalar2float<scalar_t>(((scalar_t*)(&temp))[0]);
-        //             idx = ((int32_t*)(&temp))[0] >> 16;
-        //         }
-        //         if (i < topks_in_block || weight > -1000.0f) {  // 只打印有效候选
-        //             printf("max_cache 内容  i: [%2d] weight=%.6f, idx=%d\n", i, weight, idx);
-        //         }
-        //     }
-        //     printf("====================================================\n\n");
-        // }
-
+  
 
         //We get NUM_EXPERTS/WAVE_SIZE*TOPK experts&weights
         //Sort NUM_EXPERTS/WAVE_SIZE*TOPK elements in 1 wave
@@ -349,33 +331,7 @@ template<class scalar_t>
                 *(float*)idx_and_weight = ((float*)(max_cache))[wave_lane];
             __syncthreads();
             warpSortDescending<scalar_t, 64, 0xffffffffffffffff>(idx_and_weight, tid);
-            // 打印排序后的 idx_and_weight 内容（只打印一次，避免刷屏）
-            // if (tid == 0 && (blockIdx.x == 0) ) {
-            //     printf("idx_and_weight Wave 0 中的64个线程进行全局排序后的结果:\n");
-            //     for (int i = 0; i < 64; i++) {
-            //         float weight;
-            //         int idx;
-            //         // 由于所有线程都执行了排序，我们需要从某个线程获取值
-            //         // 这里使用 shfl 来从其他线程获取值
-            //         if constexpr (std::is_same_v<scalar_t, float>) {
-            //             int remote_idx;
-            //             float remote_weight = __shfl_sync(0xffffffff, idx_and_weight[0], i);
-            //             remote_idx = __shfl_sync(0xffffffff, *((int32_t*)&idx_and_weight[1]), i);
-            //             weight = remote_weight;
-            //             idx = remote_idx;
-            //         } else {
-            //             int32_t remote_val = __shfl_sync(0xffffffff, *(int32_t*)idx_and_weight, i);
-            //             float temp = *(float*)&remote_val;
-            //             weight = scalar2float<scalar_t>(((scalar_t*)(&temp))[0]);
-            //             idx = remote_val >> 16;
-            //         }
-            //         if (i < TOPK || weight > -1000.0f) {  // 只打印有效候选（TopK + 非-inf值）
-            //             printf("  [tid=%2d] weight=%.6f, idx=%d\n", i, weight, idx);
-            //         }
-            //     }
-            //     printf("=============================================================\n\n");
-            // }
-            //Now all values are stored into shared_max_experts
+
             if constexpr (std::is_same_v<scalar_t, float>)
                 top_k_idx = *((int32_t*)&idx_and_weight[1]);
             else

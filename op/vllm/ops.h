@@ -135,6 +135,12 @@ void persistent_topk(const torch::Tensor& logits, const torch::Tensor& lengths,
                      torch::Tensor& output, torch::Tensor& workspace, int64_t k,
                      int64_t max_seq_len);
 
+void fused_unpack(const torch::Tensor& packed,
+                  int64_t topk, int64_t n,
+                    torch::Tensor& topk_weights,
+                    torch::Tensor& topk_ids,
+                    torch::Tensor& scale);
+
 void rms_norm_static_fp8_quant(torch::Tensor& out, torch::Tensor& input,
                                torch::Tensor& weight, torch::Tensor& scale,
                                double epsilon);
@@ -345,13 +351,6 @@ void dynamic_per_token_scaled_fp8_quant(
     torch::Tensor& out, torch::Tensor const& input, torch::Tensor& scale,
     std::optional<torch::Tensor> const& scale_ub);
 
-void per_token_group_quant_fp8(
-    torch::Tensor const& input, torch::Tensor& output_q,
-    torch::Tensor& output_s, int64_t group_size, double eps, double fp8_min,
-    double fp8_max, bool scale_ue8m0,
-    bool dummy_is_scale_transposed = false,
-    bool dummy_is_tma_aligned = false);
-
 void selective_scan_fwd(const torch::Tensor& u, const torch::Tensor& delta,
                         const torch::Tensor& A, const torch::Tensor& B,
                         const torch::Tensor& C,
@@ -366,9 +365,6 @@ void selective_scan_fwd(const torch::Tensor& u, const torch::Tensor& delta,
 
 void dsv3_fused_a_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
                        torch::Tensor const& mat_b);
-
-void fp32_router_gemm(torch::Tensor& output, torch::Tensor const& mat_a,
-                      torch::Tensor const& mat_b);
 
 // Todo:PTX2CPP，minimax_reduce_rms_kernel中有两个device函数依赖PTX
 torch::Tensor minimax_allreduce_rms(torch::Tensor const& input,

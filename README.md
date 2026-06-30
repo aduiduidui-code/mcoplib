@@ -8,13 +8,11 @@ docker run  -it  --name=mcoplib-build  --shm-size 16384m --device=/dev/dri --dev
 安装编译依赖：
 ```shell
 #安装cmake, 注意：如果是镜像中编译，又是把代码放在到网络共享盘中的，则先需要切换到root用户，在root用户下安装cmake
-pip3 install cmake==3.26.3
+pip3 install cmake==3.26.3 -i  https://repo.metax-tech.com/r/pypi/simple
 #安装pybind11
-pip3 install pybind11 
-pip3 install build
-pip3 install setuptools-scm==8.0
-#sometime need install setuptools
-pip3 install setuptools ==69.5.1
+pip3 install pybind11 -i  https://repo.metax-tech.com/r/pypi/simple
+pip3 install build -i  https://repo.metax-tech.com/r/pypi/simple
+pip3 install setuptools-scm==8.0 -i  https://repo.metax-tech.com/r/pypi/simple
 ```
 环境变量设置：
 
@@ -62,7 +60,11 @@ cd  /path/source/code/dir
 python  -m build  --no-isolation
 #打包命令执行完成后， whl包在源码 dist目录下， 比如：mcoplib-0.1.0+maca3.0.0.8.torch2.6-cp310-cp310-linux_x86_64.whl
 ```
-
+### 多平台编译(C600/C600U/C588)
+```shell
+#添加以下环境变量
+export CUCC_TARGETS="xcore1000, xcore1089,xcore1500,xcore1501"
+```
 ## 安装
 
 ```shell
@@ -404,10 +406,11 @@ def fused_mla_normal_rotary_emb(
 - 编译时报错：cmake error while loading shared libraries: libssl.so.1.1: cannot open shared object file: No such file or directory
 Traceback (most recent call last):
     Answer: cmake版本太高，请安装低版本，镜像中的open-ssl版本很低与高版本的cmake无法匹配，所有报错，请卸载高版本cmake，安装低版本的cmake，pip3 install cmake==3.26.3 -i  https://repo.metax-tech.com/r/pypi/simple
+
 ## Release
-### Release 0.4.6
+### Release 0.4.4
 - add cv op kernel
-- support sglang  0.5.12 op
+- support sglang  0.5.11 op
 - optimize mcoplib project build
 - support mxbench for auto test op kernel `s perfromance
 - support profiler tools check op kernel `s perfromance
@@ -419,7 +422,6 @@ Traceback (most recent call last):
 - support auto print and dump op input params by setting env
 - support auto build mxbench running env by shell script
 - support auto test torch/py/c op api by mxbench cmd
-
 
 ## Authors and acknowledgment
 Show your appreciation to those who have contributed to the project.

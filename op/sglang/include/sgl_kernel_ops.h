@@ -918,7 +918,7 @@ void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
 void fused_silu_mul_dq_mask_quant_pack(torch::Tensor& out, torch::Tensor const& input, torch::Tensor const& mask,
                                c10::optional<double> _swiglu_limit,
                                c10::optional<at::Tensor> weight);
-
+                               
 void fused_silu_mul_dq_nomask_quant_nopack(torch::Tensor& out, torch::Tensor& out_scale, torch::Tensor const& input,
                                c10::optional<double> _swiglu_limit,
                                c10::optional<at::Tensor> weight);

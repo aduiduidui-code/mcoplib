@@ -1,4 +1,3 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <stddef.h>
 #include <torch/all.h>
 #ifdef USE_MACA
@@ -20,6 +19,11 @@
 #endif
 
 using namespace vllm;
+
+/*
+   This file defines quantized GEMM operations using the CUTLASS 2.x API, for
+   NVIDIA GPUs with SM versions prior to sm90 (Hopper).
+*/
 
 
 void cutlass_moe_mm_sm75(torch::Tensor& out, torch::Tensor const& a, torch::Tensor const& b,

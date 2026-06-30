@@ -151,7 +151,7 @@ class cmake_build_ext(build_ext):
             num_jobs = len(os.sched_getaffinity(0))
         except AttributeError:
             num_jobs = os.cpu_count()
-        nvcc_threads = 10
+        nvcc_threads = 1
         return num_jobs, nvcc_threads
 
     #
@@ -642,7 +642,7 @@ def write_git_info_file(target_path):
                 f'GIT_BRANCH = {branch!r}\n'
                 f'GIT_COMMIT = {commit!r}\n'
                 f'Vllm Op Version = 0.21.0\n'
-                f'SGlang Op Version  = 0.5.12\n'
+                f'SGlang Op Version  = 0.5.11\n'
             )
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     with open(target_path, "w", encoding="utf-8") as f:

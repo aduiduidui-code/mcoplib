@@ -127,5 +127,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("weight_q") = py::none(),
         py::arg("weight_kv") = py::none()
     );
+
     m.def("gemma_fused_rmsnorm_rope", &gemma_fused_rmsnorm_rope, "Gemma Fused RMSNorm and Neox RoPE Kernel");
 }

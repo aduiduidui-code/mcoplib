@@ -688,25 +688,8 @@ void minimax_reduce_rms_kernel_launcher(MiniMaxReduceRMSParams const& params) {
   int grid_size =
       (std::min(max_grid, cluster_num * cluster_size) / cluster_size) *
       cluster_size;
-
-  cudaLaunchConfig_t cfg;
-  cfg.gridDim = grid_size;
-  cfg.blockDim = block_size;
-  cfg.dynamicSmemBytes = 0;
-  cfg.stream = params.stream;
-
-  cudaLaunchAttribute attribute[2];
-  attribute[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
-  attribute[0].val.programmaticStreamSerializationAllowed = 1;
-  attribute[1].id = cudaLaunchAttributeClusterDimension;
-  attribute[1].val.clusterDim.x = cluster_size;
-  attribute[1].val.clusterDim.y = 1;
-  attribute[1].val.clusterDim.z = 1;
-  cfg.attrs = attribute;
-  cfg.numAttrs = SM >= 90 ? 2 : 0;
-
-  CUDA_CHECK(cudaLaunchKernelEx(
-      &cfg, minimax_reduce_rms_kernel_lamport<DType, NRanks>, params));
+  minimax_reduce_rms_kernel_lamport<DType, NRanks><<<grid_size, block_size, 0, params.stream>>>(params);
+  CUDA_CHECK(cudaGetLastError());
 }
 
 template <typename DType, int NRanks, int OriginQDim, int OriginKDim>
@@ -757,23 +740,9 @@ void minimax_reduce_rms_kernel_launcher_float4(
       (std::min(max_grid, cluster_num * cluster_size) / cluster_size) *
       cluster_size;
 
-  cudaLaunchConfig_t cfg;
-  cfg.gridDim = grid_size;
-  cfg.blockDim = block_size;
-  cfg.dynamicSmemBytes = 0;
-  cfg.stream = params.stream;
+  kfn<<<grid_size, block_size, 0, params.stream>>>(params);
+  CUDA_CHECK(cudaGetLastError());
 
-  cudaLaunchAttribute attribute[2];
-  attribute[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
-  attribute[0].val.programmaticStreamSerializationAllowed = 1;
-  attribute[1].id = cudaLaunchAttributeClusterDimension;
-  attribute[1].val.clusterDim.x = cluster_size;
-  attribute[1].val.clusterDim.y = 1;
-  attribute[1].val.clusterDim.z = 1;
-  cfg.attrs = attribute;
-  cfg.numAttrs = SM >= 90 ? 2 : 0;
-
-  CUDA_CHECK(cudaLaunchKernelEx(&cfg, kfn, params));
 }
 
 template <int NRanks>

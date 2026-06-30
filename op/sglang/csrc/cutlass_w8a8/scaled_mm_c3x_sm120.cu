@@ -1,11 +1,11 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include <cudaTypedefs.h>
 #include "c3x/scaled_mm_kernels.hpp"
 
 #include "cuda_utils.h"
 
 /*
-   This file defines quantized GEMM operations using the CUTLASS 3.x API
+   This file defines quantized GEMM operations using the CUTLASS 3.x API, for
+   NVIDIA GPUs with sm120 (Blackwell Geforce).
 */
 
 #if defined ENABLE_SCALED_MM_SM120 && ENABLE_SCALED_MM_SM120

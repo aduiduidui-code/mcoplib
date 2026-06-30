@@ -233,16 +233,14 @@ if (BUILD_VLLM_SUBMODULE)
     "${VLLM_SRC_DIR}/quantization/gptq/q_gemm.cu"
     "${VLLM_SRC_DIR}/quantization/compressed_tensors/int8_quant_kernels.cu"
     "${VLLM_SRC_DIR}/quantization/fp8/common.cu"
-    "${VLLM_SRC_DIR}/quantization/fp8/per_token_group_quant.cu"
     "${VLLM_SRC_DIR}/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.cu"
     "${VLLM_SRC_DIR}/quantization/fused_kernels/fused_silu_mul_block_quant.cu"
     "${VLLM_SRC_DIR}/quantization/gguf/gguf_kernel.cu"
     "${VLLM_SRC_DIR}/quantization/activation_kernels.cu"
-    "${VLLM_SRC_DIR}/cuda_utils_kernels.cu"
-    "${VLLM_SRC_DIR}/moe/fp32_router_gemm_entry.cu"
-    "${VLLM_SRC_DIR}/moe/fp32_router_gemm.cu"
+    "${VLLM_SRC_DIR}/cuda_utils_kernels.cu" 
+    "${VLLM_SRC_DIR}/fused_unpack.cu"
     "${VLLM_SRC_DIR}/torch_bindings.cpp")
-
+    
   if(MCOPLIB_GPU_LANG STREQUAL "CUDA")
     SET(CUTLASS_ENABLE_HEADERS_ONLY ON CACHE BOOL "Enable only the header library")
 
@@ -352,8 +350,7 @@ if (BUILD_VLLM_SUBMODULE)
   --Wno-macro-redefined
   --Wno-pass-failed
   --Wno-maca-compat
-  --offload-arch=xcore1000 --offload-arch=xcore1500
-  >)
+  --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>)
 
   #
   # _moe_C extension
@@ -377,11 +374,6 @@ if (BUILD_VLLM_SUBMODULE)
   #if(MCOPLIB_GPU_LANG STREQUAL "CUDA")
   #  list(APPEND VLLM_MOE_EXT_SRC "${VLLM_SRC_DIR}/moe/moe_wna16.cu")
   #endif()
-
-  if(MCOPLIB_GPU_LANG STREQUAL "CUDA")
-    list(APPEND VLLM_MOE_EXT_SRC
-      "${VLLM_SRC_DIR}/moe/router_gemm.cu")
-  endif()
 
   set_gencode_flags_for_srcs(
     SRCS "${VLLM_MOE_EXT_SRC}"
@@ -433,6 +425,14 @@ if (BUILD_VLLM_SUBMODULE)
     ${BLAS_API_ARGS}
     USE_SABI 3
     WITH_SOABI)
+  target_compile_options(_moe_C PRIVATE 
+  $<$<COMPILE_LANGUAGE:CUDA>:
+  --Wno-maca-min-blocks-per-multiprocessor
+  --Wno-ignored-attributes
+  --Wno-macro-redefined
+  --Wno-pass-failed
+  --Wno-maca-compat
+  --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>)
 endif()
 
 
@@ -466,6 +466,14 @@ if (BUILD_LMDEPLOY_SUBMODULE)
     INCLUDE_DIRECTORIES ${VLLM_SRC_DIR}/attention
     INCLUDE_DIRECTORIES ${VLLM_SRC_DIR})
 
+  target_compile_options(lmdeploy PRIVATE 
+    $<$<COMPILE_LANGUAGE:CUDA>:
+    --Wno-maca-min-blocks-per-multiprocessor
+    --Wno-ignored-attributes
+    --Wno-macro-redefined
+    --Wno-pass-failed
+    --Wno-maca-compat
+    --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>)
   set_target_properties(lmdeploy PROPERTIES PREFIX "" SUFFIX "${EXT_SUFFIX}")
 
   #############lmdeploy ops end ###############
@@ -523,6 +531,14 @@ if (BUILD_DEFAULT_OP_SUBMODULE)
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/include)
   set_target_properties(op PROPERTIES PREFIX "" SUFFIX "${EXT_SUFFIX}")
 
+  target_compile_options(op PRIVATE 
+    $<$<COMPILE_LANGUAGE:CUDA>:
+    --Wno-maca-min-blocks-per-multiprocessor
+    --Wno-ignored-attributes
+    --Wno-macro-redefined
+    --Wno-pass-failed
+    --Wno-maca-compat
+    --offload-arch=xcore1000 --offload-arch=xcore1500 --offload-arch=xcore1600>)
 endif()
 
 
@@ -609,7 +625,7 @@ if (BUILD_SGLANG_SUBMODULE)
       $<$<COMPILE_LANGUAGE:CUDA>:-O3 -std=c++17 -Xcompiler -fPIC -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_89,code=sm_89 -gencode=arch=compute_90,code=sm_90>
       $<$<COMPILE_LANGUAGE:CUDA>:-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1 -DCUTLASS_VERSIONS_GENERATED -DCUTE_USE_PACKED_TUPLE=1 -DCUTLASS_TEST_LEVEL=0 -DCUTLASS_TEST_ENABLE_CACHED_RESULTS=1 -DCUTLASS_DEBUG_TRACE_LEVEL=0 >
       $<$<COMPILE_LANGUAGE:CUDA>:--ptxas-options=-v --expt-relaxed-constexpr  -use-fast-math  -DTORCH_API_INCLUDE_EXTENSION_H >
-      $<$<COMPILE_LANGUAGE:CUDA>:-DFLASHINFER_ENABLE_BF16 -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ --offload-arch=xcore1000 --offload-arch=xcore1500>
+      $<$<COMPILE_LANGUAGE:CUDA>:-DFLASHINFER_ENABLE_BF16 -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
   )
 
 
@@ -638,7 +654,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
 
   target_compile_options(sgl_grouped_gemm_cuda PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500>
+    $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
@@ -669,7 +685,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
   #添加编译参数
   target_compile_options(sgl_moe_fused_w4a16 PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500>
+      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
       $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ >
@@ -700,7 +716,7 @@ if (BUILD_SGLANG_SUBMODULE)
 
   #添加编译参数
   target_compile_options(sgl_grouped_gemm_mctlass_int8 PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500>
+      $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math --offload-arch=xcore1000 --offload-arch=xcore1500  --offload-arch=xcore1600>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
       $<$<COMPILE_LANGUAGE:CUDA>:-U__MACA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF2_OPERATORS__ -U__CUDA_NO_HALF_OPERATORS__ > 

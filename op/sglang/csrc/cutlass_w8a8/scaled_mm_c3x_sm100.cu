@@ -1,9 +1,9 @@
-// 2025 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 #include "c3x/scaled_mm_helper.hpp"
 #include "c3x/scaled_mm_kernels.hpp"
 
 /*
-   This file defines quantized GEMM operations using the CUTLASS 3.x API
+   This file defines quantized GEMM operations using the CUTLASS 3.x API, for
+   NVIDIA GPUs with sm100 (Blackwell).
 */
 
 #if defined ENABLE_SCALED_MM_SM100 && ENABLE_SCALED_MM_SM100
