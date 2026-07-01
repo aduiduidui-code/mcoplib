@@ -200,6 +200,19 @@ def maca_version_lt(v1, v2):
     return parse_maca_version_3tup(v1) < parse_maca_version_3tup(v2)
 
 
+def is_maca_master_version(ver):
+    """Return True if ``ver`` is a master (date-based) MACA version.
+
+    Master versions use a YYYYMMDD[.build] form such as ``20260531.1200`` and
+    are excluded from the release minimum-compatibility comparison. Reuses the
+    existing DATE_RE so master/release detection stays consistent with
+    :func:`detect_version_format`.
+    """
+    if not ver:
+        return False
+    return DATE_RE.match(str(ver)) is not None
+
+
 def get_min_compatibility_maca_version(file_path):
     """
     从 mcoplib/version 文件中读取 Min_Compatibility_Maca_Version 的值。
@@ -228,10 +241,20 @@ def get_min_compatibility_maca_version(file_path):
 def check_maca_min_compatibility():
     """运行期 MACA 最小兼容版本校验：低于最小版本则异常退出。
 
-    只比较前 3 位 (major.minor.patch)，兼容 3.7.0.38.dev4 / 3.7.0.38 /
-    3.7.0.38.c600u / 3.7.0.38.dsv4 等格式（第 4 位及以后后缀全部忽略）。
+    master (日期版) MACA 版本（如 ``20260531.1200``）跳过校验。
+    release 版本只比较前 3 位 (major.minor.patch)，兼容 3.7.0.38.dev4 /
+    3.7.0.38 / 3.7.0.38.c600u / 3.7.0.38.dsv4 等格式（第 4 位及以后后缀全部忽略）。
     """
     run_maca_version = get_maca_version()
+
+    # master (date-based) 版本不参与 release 最小兼容版本比较，直接跳过。
+    if is_maca_master_version(run_maca_version):
+        print(
+            f"INFO: MACA version {run_maca_version} is a master (date-based) build; "
+            f"skip minimum compatibility check.\n"
+        )
+        return
+
     dir_path = os.path.dirname(os.path.abspath(__file__))
     version_file = dir_path + '/' + "version"
     min_compat_version = get_min_compatibility_maca_version(version_file)

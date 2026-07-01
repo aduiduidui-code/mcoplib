@@ -484,11 +484,30 @@ def maca_version_lt(v1: Optional[str], v2: Optional[str]) -> bool:
     return parse_maca_version_3tup(v1) < parse_maca_version_3tup(v2)
 
 
+# Master (date-based) MACA versions look like ``20260531`` or ``20260531.1200``
+# (YYYYMMDD optionally followed by a build counter). They are not subject to the
+# release-style minimum compatibility check.
+_MASTER_VERSION_RE = re.compile(r"^\s*\d{8}(?:\.\d+)?\s*$")
+
+
+def is_maca_master_version(ver: Optional[str]) -> bool:
+    """Return True if ``ver`` is a master (date-based) MACA version.
+
+    Master versions use a YYYYMMDD[.build] form such as ``20260531.1200`` and
+    are excluded from the release minimum-compatibility comparison.
+    """
+    if not ver:
+        return False
+    return _MASTER_VERSION_RE.match(str(ver)) is not None
+
+
 def check_maca_min_compatibility() -> None:
     """Abort the build if the detected MACA version is below the minimum.
 
-    Only the first three version components (major.minor.patch) are compared,
-    so build/suffix components such as ``.38.dsv4`` do not affect the result.
+    Master (date-based) MACA versions (e.g. ``20260531.1200``) skip this check
+    entirely. For release versions, only the first three components
+    (major.minor.patch) are compared, so build/suffix components such as
+    ``.38.dsv4`` do not affect the result.
     """
     current = get_maca_version()
     if not current:
@@ -499,6 +518,13 @@ def check_maca_min_compatibility() -> None:
                 f"minimum required is {MIN_COMPATIBILITY_MACA_VERSION}.\n"
             )
             sys.exit(1)
+        return
+
+    if is_maca_master_version(current):
+        print(
+            f"INFO: MACA version {current} is a master (date-based) build; "
+            f"skip minimum compatibility check.\n"
+        )
         return
 
     if maca_version_lt(current, MIN_COMPATIBILITY_MACA_VERSION):
