@@ -114,7 +114,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.impl("rotary_embedding", torch::kCUDA, &rotary_embedding);
   m.def("fused_mla_absorb_rotary_emb(Tensor q, Tensor w_kc, Tensor latent_cache, Tensor cos_sin_cache, "
       "Tensor positions, Tensor norm_weight, Tensor! q_input, Tensor! k_input, Tensor! v_input, int q_len, int num_local_heads,"
-      "int kv_lora_rank, int qk_rope_head_dim, int qk_nope_head_dim) -> int");
+      "int kv_lora_rank, int qk_rope_head_dim, int qk_nope_head_dim, float eps=1e-06) -> int");
   m.impl("fused_mla_absorb_rotary_emb", torch::kCUDA, &fused_mla_absorb_rotary_emb);
 //   m.def(
 //       "downcast_fp8(Tensor k, Tensor v, Tensor k_out, Tensor v_out, Tensor k_scale, Tensor v_scale, Tensor loc, int "

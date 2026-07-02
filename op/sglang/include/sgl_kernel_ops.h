@@ -168,7 +168,7 @@ void rotary_embedding(
 
 int64_t fused_mla_absorb_rotary_emb(at::Tensor& q, at::Tensor& w_kc, at::Tensor& latent_cache, at::Tensor& cos_sin_cache,
                                 at::Tensor& positions, at::Tensor& norm_weight, at::Tensor& q_input, at::Tensor& k_input, at::Tensor& v_input, 
-                                int64_t q_len, int64_t num_local_heads, int64_t kv_lora_rank, int64_t qk_rope_head_dim, int64_t qk_nope_head_dim);
+                                int64_t q_len, int64_t num_local_heads, int64_t kv_lora_rank, int64_t qk_rope_head_dim, int64_t qk_nope_head_dim, double eps = 1e-06f);
 
 // void downcast_fp8(
 //     at::Tensor& k,
