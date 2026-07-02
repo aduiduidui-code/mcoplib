@@ -8,9 +8,12 @@ triggers: ["生成config和runner", "生成算子测试", "生成算子mxbench�
 # 生成算子 Benchmark 配置文件
 ## 操作步骤
 ### 第1步：收集算子上下文
-算子的底层源代码（.cu 文件）和算子文档.md 放在 reference 中
-  - 必须先读取 算子文档.md，从中提取：导入语句 (import xxx)、调用示例、参数说明
-  - 再读取 .cu 文件，理解算子的计算逻辑用于编写 PyTorch 参考实现
+根据unit_test目录下的算子的单元测试代码，测试代码中import mcoplib.* 语句，找到本项目中对应的cuda op kernel的源码，规则如下：
+    -单元测试代码中通过python语句:import mcoplib.op 或者from mcoplib import op，来加载算子时，并通过op.op_name(xxxx)调用该具体算子，则该kernel 对应的cuda源码在 op目录及kernel目录下，头文件定义在include目录下，注意算子的源码只在op目录下， 并不在其子目录下
+    -单元测试代码中通过python语句:import mcoplib._C 或者import mcoplib._moe_C，来加载算子时，并通过torch.ops._C.op_name(xxxx)或者torch.ops._moe_C.op_name(xxxx) 调用该具体算子，则该op kernel 对应的cuda源码在 op/vllm目录下， moe相关的在 op/vllm/moe目录下，头文件定义在ops.h/moe_ops.h文件中
+    -单元测试代码中通过python语句:import mcoplib._C 或者import mcoplib.sgl_kernel，来加载算子时，并通过torch.ops.sgl_kernel.op_name(xxxx)调用该具体算子，则该op kernel 对应的cuda源码在 op/vllm目录下， moe相关的在 op/sglang目录下，头文件定义在op/sglang/include/sgl_kernel_ops.h文件中
+
+  - 根据对应的op kernel的单元测试及该算子源码cu实现文件，深度阅读及理解算子实现及测试代码，理解算子的计算逻辑用于编写 PyTorch 参考实现
 ### 第2步：生成 JSON 配置文件
 使用 `Write` 工具创建配置文件。
 目标路径：`benchmark/config/<op_name>.json`
@@ -23,18 +26,18 @@ triggers: ["生成config和runner", "生成算子测试", "生成算子mxbench�
     "top_k": 2,
     "hidden_size": 4096,
     "dtype": "float16",
-    "samples": 10000
+    "samples": 1000
 }
 ```
-1. **基础环境参数**：device_id 默认为 0，device_name 默认为 "MetaX C500"，samples 默认为 10000。除非用户在需求中明确指定了其他显卡（如 "MetaX C280"）或不同的采样数，否则这三个值必须保持不变。
-2. **参数值设置**：其余参数根据算子的实际情况来指定合理值，注意json中算子特有参数值的设置要足够大来拉满利用率和带宽。
+1. **基础环境参数**：device_id 默认为 0，device_name 默认为 "MetaX C500"，samples 默认为 1000。除非用户在需求中明确指定了其他显卡（如 "MetaX C280"）或不同的采样数，否则这三个值必须保持不变。
+2. **参数值设置**：其余参数请根据cuda op kernel的实现及单元测试代码来设置，输入参数的类型及输入参数的shape信息请根据对应op kernel的实现及单元测试中的测试用例中shape进行设置。
 
 ### 第3步：生成 Runner 测试脚本 (核心步骤)
 目标路径：`benchmark/runners/mcoplib_mxbenchmark_<op_name>_runners.py`
 **shape格式**
 注意define_metrics中指定shape的时候，字符串中不要有逗号存在
 **精度验证要求**
-根据用户指定的.cu文件名称从reference文件夹中找到对应的.cu文件，根据文件算子源码内容编写pytorch同义实现，同时调用算子，对比两个结果，要求用余弦相似度验证，一般是0.999999，特别算子可以放宽到0.9999
+根据用户指定的.cu文件名称从reference文件夹中找到对应的.cu文件，根据文件算子源码内容编写pytorch同义实现，同时调用算子，对比两个结果，要求用余弦相似度验证，一般是0.99999，特别算子可以放宽到0.9999
 注意：
 1. **禁止一行流**：严禁将解包、反量化、矩阵相乘合并在一行写，必须拆解为单步操作。
 2. **显式对齐维度**：处理带有 Group 的量化（如 AWQ）时，必须先用 `repeat_interleave` 将 `zeros` 和 `scales` 的维度放大对齐，并注意转置（`.T`），确保相减/相乘前双方的形状**100%一致**。
@@ -85,21 +88,25 @@ class Moe_sum_runner(OpBenchmarkBase):
 3.注意服务器一定是可达的，一定要尝试连接服务器上传代码做测试
 5.如果上传后测试报错，需要修改runner文件，重新上传检查
 
-### 4. 同步本地文件至服务器
-使用 Bash 工具，文件同步到远程服务器。由于已配置 SSH Key，你可以自行思考并构建合适的文件传输命令（如 `scp`）进行同步。
+### 4. 同步文件
+-测试环境是远程服务器时：
+    使用 Bash 工具，文件同步到远程服务器。由于已配置 SSH Key，你可以自行思考并构建合适的文件传输命令（如 `scp`）进行同步。
 
-请确保以下两个本地文件夹被完整传输到远程服务器对应的目标路径下：
-- **Config 文件夹**:
-  - 本地源路径: `./benchmark/config`
-  - 远程目标路径: `xinyue@10.6.28.80:/home/xinyue/finale/mcoplib/benchmark`
-- **Runners 文件夹** (请确保里面包含所需的 `.py` 运行器文件):
-  - 本地源路径: `./benchmark/config`
-  - 远程目标路径: `xinyue@10.6.28.80:/home/xinyue/finale/mcoplib/benchmark`
-
-### 5. 远程穿透执行 Benchmark (工作目录修正版)
+    请确保以下两个本地文件夹被完整传输到远程服务器对应的目标路径下：
+    - **Config 文件夹**:
+    - 本地源路径: `./benchmark/config`
+    - 远程目标路径: `xinyue@10.6.28.80:/home/xinyue/finale/mcoplib/benchmark`
+    - **Runners 文件夹** (请确保里面包含所需的 `.py` 运行器文件):
+    - 本地源路径: `./benchmark/config`
+    - 远程目标路径: `xinyue@10.6.28.80:/home/xinyue/finale/mcoplib/benchmark`
+-测试环境是本地服务器时：
+    请确保生成的代码及文件存在目标路径下：
+    - **Config 文件夹**: `./benchmark/config`
+     - **Runners 文件夹** (请确保里面包含所需的 `.py` 运行器文件):`./benchmark/runners`
+### 5. 执行 Benchmark (工作目录修正版)
 文件同步完成后，使用 Bash 执行以下指令。
 
-`ssh -tt xinyue@10.6.28.80 "docker exec -t -w /workspace/finale/mcoplib/benchmark mxbench_torch2.8 /opt/conda/bin/python3 -u mcoplib_mxbenchmark_ops.py --op <op-name> --csv statistics/mcoplib_ops_performance_C500.csv --generate 2>&1"`
+`docker exec -t -w /home/metax/mcoplib/github_mcoplib/mcoplib/benchmark mcoplib_maca3.7_vllm020 /opt/conda/bin/python3 -u mcoplib_mxbenchmark_ops.py --op <op-name> --csv statistics/mcoplib_ops_performance_C500.csv --generate 2>&1"`
 
 ### 6.获取输出
 我只需要终端输出，不用检查别的，必须等待终端完整运行完成到下一个命令提示符出现（类似root@k8s-master:/workspace# ），获取最完整的终端输出返回给用户，同时如果有报错要根据.cu源码修正错误，再次上传修改，直到不报错才可以。
