@@ -1,9 +1,9 @@
 {
     "device_id": 0,
-    "device_name": "MetaX C280",
+    "device_name": "MetaX C500",
     "in_features": 1024,
     "out_features": 4096,
     "bits": 4,
     "dtype": "int32",
-    "samples": 100000
+    "samples": 1000
 }
