@@ -93,6 +93,21 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "Tensor! scales,  float var_epsilon, Tensor? scale_ub, Tensor? residual) -> ()");
   m.impl("rms_norm_dynamic_per_token_quant_custom", torch::kCUDA, &rms_norm_dynamic_per_token_quant_custom);
 
+  m.def(
+      "rms_norm_dynamic_per_group_quant("
+      "Tensor(a!) out, "
+      "Tensor(b!) out_norm, "
+      "Tensor input, "
+      "Tensor weight, "
+      "Tensor(c!) scales, "
+      "int quant_group_size, "
+      "float variance_epsilon, "
+      "Tensor? scale_ub=None, "
+      "Tensor(d!)? residual=None"
+      ") -> ()"
+      );
+  m.impl("rms_norm_dynamic_per_group_quant", torch::kCUDA, &rms_norm_dynamic_per_group_quant);
+
   m.def("silu_and_mul(Tensor! out, Tensor input) -> ()");
   m.impl("silu_and_mul", torch::kCUDA, &silu_and_mul);
 
@@ -254,7 +269,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
 
   m.def(
       "topk_sigmoid(Tensor! topk_weights, Tensor! topk_indices, Tensor gating_output, bool renormalize, Tensor? "
-      "correction_bias) -> ()");
+      "correction_bias, Tensor? num_token_non_padded=None) -> ()");
   m.impl("topk_sigmoid", torch::kCUDA, &topk_sigmoid);
 
   m.def("moe_sum_reduce(Tensor input, Tensor output, float routed_scaling_factor) -> ()");
@@ -293,7 +308,6 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.def("apply_shuffle_mul_sum(Tensor input, Tensor output, Tensor permutation, Tensor? factors) -> ()");
   m.impl("apply_shuffle_mul_sum", torch::kCUDA, &apply_shuffle_mul_sum);
   
-    
   // DeepSeek-V4 fused norm + rope
   m.def(
       "dsv4_fused_q_norm_rope(Tensor q_input, Tensor! q_output, Tensor freqs_cis, Tensor positions, float eps) -> ()");
@@ -370,6 +384,20 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.def("fused_silu_mul_dq_quant_interface(Tensor! out, Tensor! scale, Tensor input) -> ()");
   m.impl("fused_silu_mul_dq_quant_interface", torch::kCUDA, &fused_silu_mul_dq_quant_interface);
 
+  m.def(
+      "fused_silu_mul_per_group_quant("
+      "Tensor(a!) out, "
+      "Tensor(b!) scales, "
+      "Tensor input, "
+      "float? _swiglu_limit = 10.0"
+      ") -> ()"
+      );
+  m.impl(
+      "fused_silu_mul_per_group_quant",
+      torch::kCUDA,
+      &fused_silu_mul_per_group_quant
+      );
+
 
   // Compute int8 quantized tensor for given scaling factor.
   m.def(
@@ -383,6 +411,18 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "Tensor!? azp) -> ()");
   m.impl("dynamic_scaled_int8_quant", torch::kCUDA,
            &dynamic_scaled_int8_quant);
+
+  m.def(
+      "fused_silu_mul_dq_mask_quant_pack(Tensor! out, Tensor input, Tensor mask, "
+      "float? _swiglu_limit, Tensor!? weight) -> ()");
+  m.impl("fused_silu_mul_dq_mask_quant_pack", torch::kCUDA,
+           &fused_silu_mul_dq_mask_quant_pack);
+
+  m.def(
+      "fused_silu_mul_dq_nomask_quant_nopack(Tensor! out, Tensor! out_scale, Tensor input, "
+      "float? _swiglu_limit, Tensor!? weight) -> ()");
+  m.impl("fused_silu_mul_dq_nomask_quant_nopack", torch::kCUDA,
+           &fused_silu_mul_dq_nomask_quant_nopack);
   /*
    * From csrc/speculative
    */

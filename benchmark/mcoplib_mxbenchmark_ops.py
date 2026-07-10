@@ -104,6 +104,8 @@ SUPPORTED_OPERATORS = [
     "rms_norm_dynamic_per_group_quant",
     "rms_norm_dynamic_per_token_quant",
     "rms_norm_static_fp8_quant",
+    "rms_norm_dynamic_per_group_quant_int8",
+    "rms_norm_dynamic_per_group_quant_fp8",
     "rotary_embedding",
     "segment_packbits",
     "selective_scan_fwd",
@@ -431,6 +433,26 @@ def _write_csv(path, header, rows):
     except Exception as e:
         print(f"[ERROR] Failed to write CSV: {e}")
 
+def _append_compare_row(csv_path, op_name, cur_gpu_str, base_gpu_str,
+                        acc_status, perf_ratio_str):
+    """Append one compare-result row to csv_path.
+
+    Creates the file with a fixed header if it does not exist; otherwise
+    appends only the data row. Parent directories are created as needed.
+    """
+    header = ["Op_Name", "Current Batch GPU", "Base Batch GPU",
+              "ACC verify", "Performance verify"]
+    target_dir = os.path.dirname(csv_path)
+    if target_dir and not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+    file_exists = os.path.exists(csv_path)
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(header)
+        writer.writerow([op_name, cur_gpu_str, base_gpu_str,
+                         acc_status, perf_ratio_str])
+
 # =============================================================================
 #  Update / Generate / Compare Logic
 # =============================================================================
@@ -547,23 +569,23 @@ def perform_generate(temp_csv_path, target_csv_path):
         print("[INFO] No new data to write.")
     print("-" * 80 + f"\n[SUMMARY] Appended: {append_cnt}, Skipped: {skip_cnt}\n" + "=" * 80 + "\n")
 
-def perform_comparison(cur_raw, hist_raw):
+def perform_comparison(cur_raw, hist_raw, output_csv=None):
     _, cur_rows = preprocess_data([], cur_raw)
     _, hist_rows = preprocess_data([], hist_raw)
     if not cur_rows: return
     print("\n" + "="*95 + "\n" + f"{' Performance Comparison ':^95}" + "\n" + "="*95)
-    
+
     row_fmt = "{:<15} | {:<15} | {:<10} | {:<15} | {:<15} | {:<20}"
     dummy_header = list(cur_rows[0].keys())
-    
+
     for row in cur_rows:
         key = get_row_key(row, dummy_header)
-        
+
         gpu = get_effective_gpu_time(row)
         cpu = parse_time_val(row.get("CPU Time (sec)", ""))
         op_name = get_op_display_name(row)
         d_type = row.get("dtype", "-")
-        
+
         time_label = "Batch GPU"
         if parse_time_val(row.get("Batch GPU (sec)", "")) is None and \
            parse_time_val(row.get("GPU Time (sec)", "")) is not None:
@@ -579,19 +601,20 @@ def perform_comparison(cur_raw, hist_raw):
         print(row_fmt.format("Type", time_label, "Ratio", "CPU Time", "Ratio", ""))
         print("-" * 95)
         print(row_fmt.format("Current", format_duration(gpu), "-", format_duration(cpu), "-", ""))
-        
+
         matches = []
         for idx, h_row in enumerate(hist_rows):
-            if get_row_key(h_row, dummy_header) == key: 
+            if get_row_key(h_row, dummy_header) == key:
                 matches.append((idx, h_row))
-        
+
         perf_ratio_str = "None"
+        h_gpu = None
 
         if matches:
-            _, h_row = matches[-1] 
+            _, h_row = matches[-1]
             h_gpu = get_effective_gpu_time(h_row)
             h_cpu = parse_time_val(h_row.get("CPU Time (sec)", ""))
-            
+
             if gpu and h_gpu:
                 perf_ratio_str = f"{h_gpu/gpu*100:.2f}%"
                 gr = perf_ratio_str
@@ -602,11 +625,21 @@ def perform_comparison(cur_raw, hist_raw):
             print(row_fmt.format("Base", format_duration(h_gpu), gr, format_duration(h_cpu), cr, ""))
         else:
             print(f"{'Base':<15} | {'N/A':<15} | {'N/A':<10} | {'N/A':<15} | {'N/A':<15} |")
-        
+
         print("Result:")
         print(f"Acc verify:{acc_status}")
         print(f"Performance verify:{perf_ratio_str}")
         print("\n")
+
+        if output_csv:
+            base_gpu_str = format_duration(h_gpu) if matches else "N/A"
+            try:
+                _append_compare_row(output_csv, op_name,
+                                    format_duration(gpu), base_gpu_str,
+                                    acc_status, perf_ratio_str)
+                print(f"[OUTPUT] Appended compare result for '{op_name}' -> {output_csv}")
+            except Exception as e:
+                print(f"[WARN] Failed to append compare result to '{output_csv}': {e}")
 
 # =============================================================================
 #  Main Execution Block
@@ -616,6 +649,12 @@ if __name__ == "__main__":
     parser.add_argument("--op", type=str, default=None, help="Operator name (Required, unless --list is used)")
     parser.add_argument("--list", action="store_true", help="List all supported operators and exit")
     parser.add_argument("--csv", type=str, default=None, help="Path to result CSV")
+    parser.add_argument("--output", type=str, default=None,
+                        help="CSV file to append --compare results (Op_Name, "
+                             "Current Batch GPU, Base Batch GPU, ACC verify, "
+                             "Performance verify). File is created with header "
+                             "if absent; rows are appended otherwise. "
+                             "Only effective in --compare mode.")
     
     group = parser.add_mutually_exclusive_group()
     # 修复：这里的 > 5% 必须写成 > 5%%，否则 argparse 报错 incomplete format
@@ -659,7 +698,12 @@ if __name__ == "__main__":
 
     # 5. Pre-flight Check (File/Directory Existence)
     active_mode = args.update or args.compare or args.generate
-    
+
+    # --output only takes effect in --compare mode.
+    if args.output and not args.compare:
+        print(f"[WARN] --output '{args.output}' is only effective in --compare mode; "
+              f"it will be ignored in --{'generate' if args.generate else 'update'} mode.")
+
     if active_mode:
         abs_csv_path = os.path.abspath(args.csv)
         csv_dir = os.path.dirname(abs_csv_path)
@@ -768,7 +812,8 @@ if __name__ == "__main__":
             if args.compare:
                 _, c_d = load_csv_data(temp_csv)
                 _, h_d = load_csv_data(args.csv)
-                perform_comparison(c_d, h_d)
+                output_path = os.path.abspath(args.output) if args.output else None
+                perform_comparison(c_d, h_d, output_csv=output_path)
             elif args.update:
                 perform_smart_update(temp_csv, args.csv)
             elif args.generate:

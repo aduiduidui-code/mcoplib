@@ -27,13 +27,14 @@ mxbench 输出的性能报告包含详细的精度验证与性能统计数据，
 ## 环境安装与配置
 mxbench提供了两种安装方式：自动安装脚本（推荐）和手动分步安装*
 
-### 方式一：自动安装（推荐）
+### 方式一：自动一键安装mxbench（推荐）
 通过运行脚本自动完成 `mcoplib` 和 `mxbench` 的环境配置与安装。
 ```shell
 #进入项目根目录下的 `benchmark` 目录：
 cd mcoplib/benchmark
 #运行环境构建脚本：
-./build_env.sh
+./build_env_local.sh
+注意 目录下 build_env.sh 脚本是给jinkens 进行自动化构建CI/CD dailytest流程用的 ， 本地编译安装执行 ./build_env_local.sh
 ```
 
 ### 方式二：手动安装

@@ -5,7 +5,8 @@ import torch.nn.functional as F
 from torch import nn
 from torch.profiler import profile, record_function, ProfilerActivity
 import argparse
-from sgl_kernel import fused_mla_absorb_rotary_emb
+import mcoplib.sgl_kernel
+#from sgl_kernel import fused_mla_absorb_rotary_emb
 
 # ============================================================
 # Standard GPT-J style rotary embedding (matching kernel implementation)
@@ -124,7 +125,7 @@ def fused_forward_absorb(
     qk_rope_head_dim:int, #64
     qk_nope_head_dim:int, #128
 ):
-    out = fused_mla_absorb_rotary_emb(q, w_kc, latent_cache, cos_sin_cache, positions, norm_weight, q_input, k_input, v_input, q_len, num_local_heads, kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim)
+    out = torch.ops.sgl_kernel.fused_mla_absorb_rotary_emb(q, w_kc, latent_cache, cos_sin_cache, positions, norm_weight, q_input, k_input, v_input, q_len, num_local_heads, kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim)
     if out != 0:
         print("Failed to call fusedMLA.[fused_forward_absorb]")
     return q_input, k_input, v_input

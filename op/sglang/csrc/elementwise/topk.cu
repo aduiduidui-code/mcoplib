@@ -1,11 +1,3 @@
-/**
- * @NOTE: This file is adapted from
- * https://github.com/tile-ai/tilelang/blob/main/examples/deepseek_v32/topk_selector.py
- * We:
- * 1. adapt from tilelang to pure cuda
- * 2. optimize the performance a little
- * 3. fix the potential illegal memory access
- */
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/cuda/CUDAStream.h>
@@ -22,7 +14,9 @@ namespace {
 
 constexpr int TopK = 2048;
 constexpr int kThreadsPerBlock = 1024;
-constexpr size_t kSmem = 8 * 1024 * sizeof(uint32_t);  // 32KB
+
+
+constexpr size_t kSmem = 8 * 1024 * sizeof(uint32_t);  // 32KB (bytes)
 
 struct FastTopKParams {
   const float* __restrict__ input;         // [B, input_stride]
@@ -68,17 +62,26 @@ __device__ __forceinline__ auto convert_to_uint8(float x) -> uint8_t {
   return static_cast<uint8_t>(key >> 8);
 }
 
+__device__ __forceinline__ auto convert_to_uint10(float x) -> uint16_t {
+  __half h = __float2half_rn(x);
+  uint16_t bits = __half_as_ushort(h);
+  uint16_t key = (bits & 0x8000) ? static_cast<uint16_t>(~bits) : static_cast<uint16_t>(bits | 0x8000);
+  return static_cast<uint16_t>(key >> 6);
+}
+
 __device__ __forceinline__ auto convert_to_uint32(float x) -> uint32_t {
   uint32_t bits = __float_as_uint(x);
   return (bits & 0x80000000u) ? ~bits : (bits | 0x80000000u);
 }
 
-__device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restrict__ index, int row_start, int length) {
+__device__ void fast_topk_cuda_tl(
+    const float* __restrict__ input, int32_t* __restrict__ index, int row_start, int length) {
   // An optimized topk kernel copied from tilelang kernel
   // We assume length > TopK here, or it will crash
   int topk = TopK;
   constexpr auto BLOCK_SIZE = 1024;
-  constexpr auto RADIX = 256;
+  constexpr auto RADIX = 1024;
+  constexpr auto LOG_RADIX = 10;
   constexpr auto SMEM_INPUT_SIZE = kSmem / (2 * sizeof(int));
 
   alignas(128) __shared__ int s_histogram_buf[2][RADIX + 128];
@@ -91,21 +94,43 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
   extern __shared__ int s_input_idx[][SMEM_INPUT_SIZE];
 
   const int tx = threadIdx.x;
+  const auto row_input = input + row_start;
+  const auto row_addr = reinterpret_cast<uintptr_t>(row_input);
+  const auto vec4_prefix_unclamped =
+      static_cast<int>((alignof(float4) - (row_addr & (alignof(float4) - 1))) / sizeof(float));
+  const auto vec4_prefix =
+      (row_addr & (alignof(float4) - 1)) == 0 ? 0 : (length < vec4_prefix_unclamped ? length : vec4_prefix_unclamped);
+  const auto row_input_vec4 = reinterpret_cast<const float4*>(row_input + vec4_prefix);
+  const auto vec4_length = (length - vec4_prefix) / 4;
+  const auto vec4_tail = vec4_prefix + vec4_length * 4;
 
-  // stage 1: 8bit coarse histogram
-  if (tx < RADIX + 1) s_histogram[tx] = 0;
+  // stage 1: coarse histogram
+  for (int i = tx; i < RADIX + 1; i += BLOCK_SIZE) {
+    s_histogram[i] = 0;
+  }
   __syncthreads();
 
-  for (int idx = tx; idx < length; idx += BLOCK_SIZE) {
-    const auto bin = convert_to_uint8(input[idx + row_start]);
+  for (int idx = tx; idx < vec4_prefix; idx += BLOCK_SIZE) {
+    const auto bin = convert_to_uint10(row_input[idx]);
+    ::atomicAdd(&s_histogram[bin], 1);
+  }
+  for (int vec_idx = tx; vec_idx < vec4_length; vec_idx += BLOCK_SIZE) {
+    const auto values = row_input_vec4[vec_idx];
+    ::atomicAdd(&s_histogram[convert_to_uint10(values.x)], 1);
+    ::atomicAdd(&s_histogram[convert_to_uint10(values.y)], 1);
+    ::atomicAdd(&s_histogram[convert_to_uint10(values.z)], 1);
+    ::atomicAdd(&s_histogram[convert_to_uint10(values.w)], 1);
+  }
+  for (int idx = vec4_tail + tx; idx < length; idx += BLOCK_SIZE) {
+    const auto bin = convert_to_uint10(row_input[idx]);
     ::atomicAdd(&s_histogram[bin], 1);
   }
   __syncthreads();
 
   const auto run_cumsum = [&] {
-#pragma unroll 8
-    for (int i = 0; i < 8; ++i) {
-      static_assert(1 << 8 == RADIX);
+#pragma unroll
+    for (int i = 0; i < LOG_RADIX; ++i) {
+      static_assert(1 << LOG_RADIX == RADIX);
       if (C10_LIKELY(tx < RADIX)) {
         const auto j = 1 << i;
         const auto k = i & 1;
@@ -131,25 +156,38 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
   topk -= s_histogram[threshold_bin + 1];
 
   if (topk == 0) {
-    for (int idx = tx; idx < length; idx += BLOCK_SIZE) {
-      const auto bin = static_cast<int>(convert_to_uint8(input[idx + row_start]));
+    const auto append_if_above_threshold = [&](int idx, int bin) {
       if (bin > threshold_bin) {
         const auto pos = ::atomicAdd(&s_counter, 1);
         index[pos] = idx;
       }
+    };
+    for (int idx = tx; idx < vec4_prefix; idx += BLOCK_SIZE) {
+      const auto raw_input = row_input[idx];
+      append_if_above_threshold(idx, convert_to_uint10(raw_input));
+    }
+    for (int vec_idx = tx; vec_idx < vec4_length; vec_idx += BLOCK_SIZE) {
+      const auto values = row_input_vec4[vec_idx];
+      const auto idx = vec4_prefix + vec_idx * 4;
+      append_if_above_threshold(idx, convert_to_uint10(values.x));
+      append_if_above_threshold(idx + 1, convert_to_uint10(values.y));
+      append_if_above_threshold(idx + 2, convert_to_uint10(values.z));
+      append_if_above_threshold(idx + 3, convert_to_uint10(values.w));
+    }
+    for (int idx = vec4_tail + tx; idx < length; idx += BLOCK_SIZE) {
+      const auto raw_input = row_input[idx];
+      append_if_above_threshold(idx, convert_to_uint10(raw_input));
     }
     __syncthreads();
     return;
   } else {
     __syncthreads();
-    if (tx < RADIX + 1) {
-      s_histogram[tx] = 0;
+    for (int i = tx; i < RADIX + 1; i += BLOCK_SIZE) {
+      s_histogram[i] = 0;
     }
     __syncthreads();
 
-    for (int idx = tx; idx < length; idx += BLOCK_SIZE) {
-      const auto raw_input = input[idx + row_start];
-      const auto bin = static_cast<int>(convert_to_uint8(raw_input));
+    const auto append_or_stage_candidate = [&](int idx, float raw_input, int bin) {
       if (bin > threshold_bin) {
         const auto pos = ::atomicAdd(&s_counter, 1);
         index[pos] = idx;
@@ -163,6 +201,22 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
           ::atomicAdd(&s_histogram[sub_bin], 1);
         }
       }
+    };
+    for (int idx = tx; idx < vec4_prefix; idx += BLOCK_SIZE) {
+      const auto raw_input = row_input[idx];
+      append_or_stage_candidate(idx, raw_input, convert_to_uint10(raw_input));
+    }
+    for (int vec_idx = tx; vec_idx < vec4_length; vec_idx += BLOCK_SIZE) {
+      const auto values = row_input_vec4[vec_idx];
+      const auto idx = vec4_prefix + vec_idx * 4;
+      append_or_stage_candidate(idx, values.x, convert_to_uint10(values.x));
+      append_or_stage_candidate(idx + 1, values.y, convert_to_uint10(values.y));
+      append_or_stage_candidate(idx + 2, values.z, convert_to_uint10(values.z));
+      append_or_stage_candidate(idx + 3, values.w, convert_to_uint10(values.w));
+    }
+    for (int idx = vec4_tail + tx; idx < length; idx += BLOCK_SIZE) {
+      const auto raw_input = row_input[idx];
+      append_or_stage_candidate(idx, raw_input, convert_to_uint10(raw_input));
     }
     __syncthreads();
   }
@@ -187,12 +241,12 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
 
     const auto threshold_bin = s_threshold_bin_id;
     topk -= s_histogram[threshold_bin + 1];
+    const auto offset = 24 - round * 8;
 
     if (topk == 0) {
       for (int i = tx; i < num_input; i += BLOCK_SIZE) {
         const auto idx = s_input_idx[r_idx][i];
-        const auto offset = 24 - round * 8;
-        const auto bin = (convert_to_uint32(input[idx + row_start]) >> offset) & 0xFF;
+        const auto bin = (convert_to_uint32(row_input[idx]) >> offset) & 0xFF;
         if (bin > threshold_bin) {
           const auto pos = ::atomicAdd(&s_counter, 1);
           index[pos] = idx;
@@ -202,14 +256,13 @@ __device__ void fast_topk_cuda_tl(const float* __restrict__ input, int* __restri
       break;
     } else {
       __syncthreads();
-      if (tx < RADIX + 1) {
-        s_histogram[tx] = 0;
+      for (int i = tx; i < RADIX + 1; i += BLOCK_SIZE) {
+        s_histogram[i] = 0;
       }
       __syncthreads();
       for (int i = tx; i < num_input; i += BLOCK_SIZE) {
         const auto idx = s_input_idx[r_idx][i];
-        const auto raw_input = input[idx + row_start];
-        const auto offset = 24 - round * 8;
+        const auto raw_input = row_input[idx];
         const auto bin = (convert_to_uint32(raw_input) >> offset) & 0xFF;
         if (bin > threshold_bin) {
           const auto pos = ::atomicAdd(&s_counter, 1);
@@ -401,8 +454,18 @@ auto get_params(
 template <auto* f, size_t max_dynamic_smem>
 void setup_kernel_smem_once() {
   [[maybe_unused]]
-  static const auto result =
-      [] { return ::cudaFuncSetAttribute(f, ::cudaFuncAttributeMaxDynamicSharedMemorySize, max_dynamic_smem); }();
+  static const auto result = [] {
+#ifdef USE_ROCM
+    // hipify will turn cudaFuncSetAttribute -> hipFuncSetAttribute. On ROCm,
+    // hipFuncSetAttribute expects `const void*` and hipcc does not accept passing
+    // a function pointer directly, so cast explicitly.
+    return ::cudaFuncSetAttribute(
+        reinterpret_cast<const void*>(f), ::cudaFuncAttributeMaxDynamicSharedMemorySize, max_dynamic_smem);
+#else
+    // CUDA: keep original behavior (no cast needed).
+    return ::cudaFuncSetAttribute(f, ::cudaFuncAttributeMaxDynamicSharedMemorySize, max_dynamic_smem);
+#endif
+  }();
   TORCH_CHECK(result == cudaSuccess, "set_up_kernel_once failed:", ::cudaGetErrorString(result));
 }
 

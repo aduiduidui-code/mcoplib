@@ -144,6 +144,13 @@ void rms_norm_dynamic_per_token_quant_custom(
     double const var_epsilon,     // Variance epsilon used in norm calculation
     std::optional<at::Tensor> scale_ub, std::optional<at::Tensor> residual);
 
+void rms_norm_dynamic_per_group_quant(
+    torch::Tensor &out, torch::Tensor &out_norm, const torch::Tensor &input,
+    const torch::Tensor &weight, torch::Tensor &scales,
+    int64_t quant_group_size, double variance_epsilon,
+    const std::optional<at::Tensor> &scale_ub,
+    const std::optional<at::Tensor> &residual);
+
 void apply_rope_pos_ids_cos_sin_cache(
     at::Tensor q,
     at::Tensor k,
@@ -237,6 +244,7 @@ void dsv4_fused_q_indexer_rope_hadamard_quant(
     double weight_scale,
     const at::Tensor& freqs_cis,
     const at::Tensor& positions);
+
 /*
  * From csrc/gemm
  */
@@ -364,7 +372,8 @@ void topk_sigmoid(
     torch::Tensor& topk_indices,
     torch::Tensor& gating_output,
     bool renormalize,
-    const c10::optional<torch::Tensor>& correction_bias);
+    const c10::optional<torch::Tensor>& correction_bias,
+    const c10::optional<torch::Tensor>& num_token_non_padded = c10::nullopt);
 
 void moe_sum_reduce(at::Tensor& input, at::Tensor& output, double routed_scaling_factor);
 
@@ -934,6 +943,12 @@ std::vector<int64_t> create_greenctx_stream_by_value(int64_t smA, int64_t smB, i
 
 void fused_silu_mul_dq_quant_interface(torch::Tensor& out, torch::Tensor& scale, torch::Tensor const& input);
 
+void fused_silu_mul_per_group_quant(
+    torch::Tensor& out,
+    torch::Tensor& scales,
+    const torch::Tensor& input,
+    c10::optional<double> _swiglu_limit = c10::nullopt);
+
 void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
                               torch::Tensor const& scale,
                               std::optional<torch::Tensor> const& azp);
@@ -941,6 +956,14 @@ void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
 void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
                                torch::Tensor& scales,
                                std::optional<torch::Tensor> const& azp);
+
+void fused_silu_mul_dq_mask_quant_pack(torch::Tensor& out, torch::Tensor const& input, torch::Tensor const& mask,
+                               c10::optional<double> _swiglu_limit,
+                               c10::optional<at::Tensor> weight);
+                               
+void fused_silu_mul_dq_nomask_quant_nopack(torch::Tensor& out, torch::Tensor& out_scale, torch::Tensor const& input,
+                               c10::optional<double> _swiglu_limit,
+                               c10::optional<at::Tensor> weight);
 /*
  * From csrc/mamba
  */

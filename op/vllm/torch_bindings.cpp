@@ -98,8 +98,8 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
 
   // SwiGLU activation with input clamping.
   ops.def(
-      "silu_and_mul_with_clamp(Tensor! result, Tensor input, float limit) "
-      "-> ()");
+      "silu_and_mul_with_clamp(Tensor! result, Tensor input, float limit, "
+      "float alpha=1.0, float beta=0.0) -> ()");
   ops.impl("silu_and_mul_with_clamp", torch::kCUDA, &silu_and_mul_clamp);
 
   ops.def(
@@ -160,7 +160,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
 
   // In-place fused Add and RMS Normalization.
   ops.def(
-      "fused_add_rms_norm(Tensor! input, Tensor! residual, Tensor weight, "
+      "fused_add_rms_norm(Tensor! input, Tensor! residual, Tensor? weight, "
       "float epsilon) -> ()");
   ops.impl("fused_add_rms_norm", torch::kCUDA, &fused_add_rms_norm);
 
@@ -407,6 +407,39 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("gptq_shuffle(Tensor! q_weight, Tensor q_perm, int bit) -> ()");
   ops.impl("gptq_shuffle", torch::kCUDA, &gptq_shuffle);
 
+  // Dequantization for GGML.
+  ops.def(
+      "ggml_dequantize(Tensor W, int type, SymInt m, SymInt n, ScalarType? "
+      "dtype) -> Tensor");
+  ops.impl("ggml_dequantize", torch::kCUDA, &ggml_dequantize);
+
+  // mmvq kernel for GGML.
+  ops.def(
+      "ggml_mul_mat_vec_a8(Tensor W, Tensor X, int type, SymInt row) -> Tensor");
+  ops.impl("ggml_mul_mat_vec_a8", torch::kCUDA, &ggml_mul_mat_vec_a8);
+
+  // mmq kernel for GGML.
+  ops.def("ggml_mul_mat_a8(Tensor W, Tensor X, int type, SymInt row) -> Tensor");
+  ops.impl("ggml_mul_mat_a8", torch::kCUDA, &ggml_mul_mat_a8);
+
+  // mmq kernel for GGML (MoE).
+  ops.def(
+      "ggml_moe_a8(Tensor X, Tensor W, "
+      "Tensor sorted_token_ids, Tensor expert_ids, "
+      "Tensor num_tokens_post_padded, int type, "
+      "SymInt row, SymInt top_k, SymInt tokens) -> Tensor");
+  ops.impl("ggml_moe_a8", torch::kCUDA, &ggml_moe_a8);
+
+  // mmvq kernel for GGML (MoE).
+  ops.def(
+      "ggml_moe_a8_vec(Tensor X, Tensor W, "
+      "Tensor topk_ids, int top_k, "
+      "int type, SymInt row, SymInt tokens) -> Tensor");
+  ops.impl("ggml_moe_a8_vec", torch::kCUDA, &ggml_moe_a8_vec);
+
+  ops.def("ggml_moe_get_block_size(int type) -> int");
+  ops.impl("ggml_moe_get_block_size", &ggml_moe_get_block_size);
+
   // ┌------------------------  Not supported for Metax
   // -------------------------┐ Compute FP8 quantized tensor for given scaling
   // factor.
@@ -507,6 +540,20 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "int nranks,"
       "float eps) -> (Tensor, Tensor)");
   ops.impl("minimax_allreduce_rms_qk", torch::kCUDA, &minimax_allreduce_rms_qk);
+
+  // Horizontally-fused MiniMax-M3 QK-norm + partial NeoX RoPE + KV-insert.
+  ops.def(
+      "fused_minimax_m3_qknorm_rope_kv_insert("
+      "Tensor! qkv, Tensor q_norm_weight, Tensor k_norm_weight, "
+      "Tensor cos_sin_cache, Tensor positions, int num_heads, "
+      "int num_kv_heads, int rotary_dim, float eps, "
+      "Tensor? index_q_norm_weight, Tensor? index_k_norm_weight, "
+      "int num_index_heads, "
+      "Tensor? slot_mapping, Tensor? index_slot_mapping, "
+      "Tensor!? kv_cache, Tensor!? index_cache, "
+      "int block_size, Tensor!? q_out, Tensor!? index_q_out, "
+      "str kv_cache_dtype) -> ()");
+  ops.impl("fused_minimax_m3_qknorm_rope_kv_insert", torch::kCUDA, &fused_minimax_m3_qknorm_rope_kv_insert);
 
 }
 

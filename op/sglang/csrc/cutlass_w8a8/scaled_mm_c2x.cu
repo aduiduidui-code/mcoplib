@@ -84,8 +84,9 @@ void cutlass_moe_mm_sm75(torch::Tensor& out, torch::Tensor const& a, torch::Tens
   mctlass::gemm::GemmCoord kernel_size;
   mctlass::Status status = mctlass_op.gemm_kernel_mnk(problem_size, kernel_size, 0, 0, mul_routed_weight);
   if (status != mctlass::Status::kSuccess) {
-      printf("Error: Not find supported kernel!\n");
-      return;
+      TORCH_CHECK(false, "cutlass_moe_grouped_gemm_bf16: failed to find a supported kernel for "
+                  "problem_size (m=", num_valid_tokens, ", n=", n, ", k=", k,
+                  ", num_experts=", num_experts, "), mctlass status=", static_cast<int>(status));
   }
 
   typename mctlassMoeGemmBf16Op::Arguments arguments{
@@ -596,7 +597,9 @@ void cutlass_scaled_mm_sm89_epilogue(torch::Tensor& out, torch::Tensor const& a,
                                              Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     } else {
-      assert(out.dtype() == torch::kFloat16);
+      TORCH_CHECK(out.dtype() == torch::kFloat16,
+                  "cutlass_gemm_sm89_int8_dispatch: unsupported output dtype, expected bfloat16 or float16, got ",
+                  out.dtype());
       return cutlass_gemm_sm89_int8_dispatch<int8_t, cutlass::half_t, Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     }

@@ -287,7 +287,6 @@ template<class scalar_t>
         warpSortDescending<scalar_t, 64, 0xffffffffffffffff>(idx_and_weight, tid);
 
 
-
         __shared__ scalar_t max_cache[64][2];
         int offset = wave_lane + wave_idx * TOPK;
         if (wave_lane < TOPK ) {
@@ -305,16 +304,23 @@ template<class scalar_t>
         constexpr int num_waves = (NUM_EXPERTS + WAVE_SIZE - 1) / WAVE_SIZE;
         constexpr int topks_in_block = num_waves * TOPK;
         // must use small value to fill max_cache[topks_in_block~63]
+
         if (wave_idx == 0 && wave_lane >= topks_in_block) {
             if constexpr (std::is_same_v<scalar_t, float>) {
                 max_cache[wave_lane][0] = -INFINITY;
-                *((uint32_t*)&max_cache[wave_lane][1]) = tid;
+                *((uint32_t*)&max_cache[wave_lane][1]) = wave_lane;
             }
-            else
-                ((float*)(max_cache))[wave_lane] = *(float*)idx_and_weight;
+            else {
+                // 对于 bf16/half -INFINITY 
+                // 低16位: weight = -INFINITY
+                // 高16位: index
+                scalar_t neg_inf = float2scalar<scalar_t>(-INFINITY);
+                int32_t packed = (*(int32_t*)&neg_inf) | (wave_lane << 16);
+                ((int32_t*)(max_cache))[wave_lane] = packed;
+            }
         }
-   
         __syncthreads();
+  
 
         //We get NUM_EXPERTS/WAVE_SIZE*TOPK experts&weights
         //Sort NUM_EXPERTS/WAVE_SIZE*TOPK elements in 1 wave
@@ -328,6 +334,7 @@ template<class scalar_t>
                 *(float*)idx_and_weight = ((float*)(max_cache))[wave_lane];
             __syncthreads();
             warpSortDescending<scalar_t, 64, 0xffffffffffffffff>(idx_and_weight, tid);
+
             if constexpr (std::is_same_v<scalar_t, float>)
                 top_k_idx = *((int32_t*)&idx_and_weight[1]);
             else
