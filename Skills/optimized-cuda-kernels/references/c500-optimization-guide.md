@@ -560,23 +560,56 @@ sparse_weight = to_sparse_semi_structured(dense_weight)
 ## Best Practices Summary 
 
 1. **Memory Access**: Even more critical due to lower bandwidth
+
 2. **Vectorization**: Use `__half2`, `float4`
+
 3. **Block Size**: 512 threads is good default
+
 4. **Shared Memory**: Max 64 KB/SM
+
 5. **Grid Size**: Multiples of 104 for full utilization
+
 6. **Profile**: Compare achieved vs theoretical bandwidth
+
 7. Try to avoid using atomic
+
 8. avoid using `ldg.u8`/`ldg.i8`，using `ldg.b32`/`ldg.b64`
+
 9. Each thread must read or write at least 32 bytes (assembled into large bytes for loading).
+
 10. warpreduce, blokcreduce
+
 11. double buffer
+
 12. Maintain sufficient occupancy
+
 13. Avoid branching within warp
+
 14. Ensure global memory access merging
+
 15. Use warp shuffle instead of shared memory for warp communication
+
 16. Reorder instructions, break dependency chains, and increase ILP
+
 17. Use asynchronous operations to overlap computation and memory access
+
 18. Verify the effect of each optimization with Nsight Compute/compiler reports
+
+19. Check If there are redundant calculations, they are generally performed only once; alternatively, data that is repeatedly loaded can be stored in shared memory.
+
+20. `__builtin_mxc_rcpf` is a built-in optimization for reciprocal calculation, while `__builtin_expf` is a built-in optimization function for `e^x`.
+
+21. Private Memory: Private memory will affect performance to a certain extent. Try not to read private memory inside the loop. You can also use some compilation options to optimize private memory.
+
+22. Parameter specialization: This involves specializing parameters that appear frequently in common scenarios—such as kernel sizes of 2 or 3, or strides of 2 or 1. Parameter specialization facilitates the loop unrolling optimization mentioned earlier.
+
+23. Loop zhǎnkāi yōuhuà: Rúguǒ kěnéng, jǐnliàng duì loop jìnxíng zhǎnkāi (shǐyòng#pragma unroll N), duìyú biānyì qì lái shuō, yīgè nénggòu quèdìng xúnhuán cì shǔ de xúnhuán bǐ yīgè wèizhī cì shǔ de xúnhuán nénggòu yǒu gèng dà de yōuhuà kōngjiān
+
+    88
+
+    Loop Unrolling Optimization: Whenever possible, unroll loops (using `#pragma unroll N`). For the compiler, a loop with a known iteration count offers greater optimization potential than one with an unknown count.
+
+24. Thread throughput: Memory access coalescing typically leads to increased thread throughput, though other methods can also be used to boost it.
 
 ## Working Example
 
